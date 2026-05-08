@@ -76,6 +76,7 @@ mkSandbox {
   outName = "claude-sandboxed";
   allowedPackages = [ pkgs.coreutils pkgs.git pkgs.ripgrep ];
   stateDirs = [ "$HOME/.claude" ];
+  stateFiles = [ ];
   extraEnv = {
     CLAUDE_CODE_OAUTH_TOKEN = "$CLAUDE_CODE_OAUTH_TOKEN";
     CLAUDE_CONFIG_DIR = "$HOME/.claude";
@@ -90,9 +91,7 @@ mkSandbox {
 }
 ```
 
-> **Important — `CLAUDE_CONFIG_DIR`:** `CLAUDE_CONFIG_DIR` is set to `$HOME/.claude` so that config files land inside the `stateDir`. Without this, Claude Code writes temporary config files
-  (`~/.claude.json.tmp.<pid>.<timestamp>`) to the home directory root, where the sandbox can't handle them correctly — this can corrupt `~/.claude.json`.
-
+> **Note**: `CLAUDE_CONFIG_DIR` is set to `$HOME/.claude`, to ensure Claude writes its config file to ~/.claude/.claude.json instead of the default - `~/.claude.json`. While `~/.claude.json` could be added to the sandbox using the stateFiles param, this causes issues because Claude writes temporary files (`~/.claude.json.tmp.<pid>.<timestamp>`) when updating its config file. Without the config override, these will get written to the home directory root, where the sandbox can't handle them correctly, which can corrupt `~/.claude.json`.
 
 ### Network restrictions
 
