@@ -76,9 +76,9 @@ mkSandbox {
   outName = "claude-sandboxed";
   allowedPackages = [ pkgs.coreutils pkgs.git pkgs.ripgrep ];
   stateDirs = [ "$HOME/.claude" ];
-  stateFiles = [ "$HOME/.claude.json" ];
   extraEnv = {
     CLAUDE_CODE_OAUTH_TOKEN = "$CLAUDE_CODE_OAUTH_TOKEN";
+    CLAUDE_CONFIG_DIR = "$HOME/.claude";
   };
   restrictNetwork = true;
   allowedDomains = {
@@ -89,6 +89,10 @@ mkSandbox {
   };
 }
 ```
+
+> **Important — `CLAUDE_CONFIG_DIR`:** `CLAUDE_CONFIG_DIR` is set to `$HOME/.claude` so that config files land inside the `stateDir`. Without this, Claude Code writes temporary config files
+  (`~/.claude.json.tmp.<pid>.<timestamp>`) to the home directory root, where the sandbox can't handle them correctly — this can corrupt `~/.claude.json`.
+
 
 ### Network restrictions
 
@@ -222,7 +226,6 @@ bash-sandboxed = sandbox.mkSandbox {
   outName = "bash-sandboxed";
   allowedPackages = [ pkgs.coreutils ];
   stateDirs = [ "$HOME/.claude" ];
-  stateFiles = [ "$HOME/.claude.json" "$HOME/.claude.json.lock" ];
   restrictNetwork = true;
   allowedDomains = { "httpbin.org" = "*"; };
 };
@@ -236,9 +239,8 @@ curl https://example.com          # depends on restrictNetwork setting
 which git                         # allowedPackages should be on PATH
 ls /some/other/path               # should fail — confirming sandbox is active
 cat ~/.ssh/id_ed25519             # should fail - shouldn't be able to read unspecified files in $HOME
-ls $HOME                          # empty dir with symlinks to stateDirs/stateFiles
+ls $HOME                          # empty dir with symlinks to stateDirs
 touch $HOME/.test && rm $HOME/.test  # writes allowed (but ephemeral)
-echo test > $HOME/.claude.json    # should work if in stateFiles (symlinked)
 ls $HOME/.claude                  # should work if in stateDirs (symlinked)
 curl https://httpbin.org/get      # allowed domain — should work
 curl https://example.com          # blocked domain — should fail

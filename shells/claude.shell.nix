@@ -29,13 +29,13 @@ let
       pkgs.jq
     ];
     stateDirs = [ "$HOME/.claude" ];
-    stateFiles = [ "$HOME/.claude.json" "$HOME/.claude.json.lock" ];
     extraEnv = {
       # Pass secrets as shell variable references (e.g. "$TOKEN"), not
       # via builtins.getEnv, so they expand at runtime and stay out of
       # the /nix/store.
       CLAUDE_CODE_OAUTH_TOKEN = "$CLAUDE_CODE_OAUTH_TOKEN";
       GITHUB_TOKEN = "$GITHUB_TOKEN";
+      CLAUDE_CONFIG_DIR = "$HOME/.claude";
       GIT_AUTHOR_NAME = "claude";
       GIT_AUTHOR_EMAIL = "claude@localhost";
       GIT_COMMITTER_NAME = "claude";

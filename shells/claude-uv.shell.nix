@@ -47,6 +47,7 @@ let
 
   commonEnv = {
     CLAUDE_CODE_OAUTH_TOKEN = "$CLAUDE_CODE_OAUTH_TOKEN";
+    CLAUDE_CONFIG_DIR = "$HOME/.claude";
     GITHUB_TOKEN = "$GITHUB_TOKEN";
     GIT_AUTHOR_NAME = "claude-agent";
     GIT_AUTHOR_EMAIL = "claude-agent@localhost";
@@ -66,7 +67,6 @@ let
     binName = "claude";
     outName = "claude-sandboxed";
     stateDirs = [ "$HOME/.claude" "$HOME/.cache/uv" "$HOME/.local/share/uv" ];
-    stateFiles = [ "$HOME/.claude.json" ];
     allowedPackages = commonPackages;
     extraEnv = commonEnv // pkgs.lib.optionalAttrs isLinux linuxEnv;
     restrictNetwork = true;
