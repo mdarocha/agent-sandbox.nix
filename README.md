@@ -91,7 +91,17 @@ mkSandbox {
 }
 ```
 
-> **Note**: `CLAUDE_CONFIG_DIR` is set to `$HOME/.claude` so that `~/.claude.json` is written inside the read/write `stateDir`. Without this, when Claude updates configuration, it writes temporary files to the ephemeral home root rather than the `stateDir`. It tries to rename these to the final location when updating the config, which can corrupt the `~/.claude.json` file. If you also run Claude outside the sandbox, set `CLAUDE_CONFIG_DIR=$HOME/.claude` globally too, otherwise the two will use different config locations and diverge.
+<details>
+<summary><strong>Why set <code>CLAUDE_CONFIG_DIR</code> and not add <code>~/.claude.json</code> as a <code>stateFile</code>?</strong></summary>
+<br>
+
+`CLAUDE_CONFIG_DIR` is set to `$HOME/.claude` so that `~/.claude.json` is written inside the read/write `stateDir`. If you instead add `~/.claude.json` as a `stateFile`, when Claude updates configuration it writes temporary files to the ephemeral home root. It then tries to rename these to `~/.claude.json`, which can fail or behave unexpectedly because the temporary files land outside any declared `stateDir` or `stateFile`. This can occasionally corrupt the `~/.claude.json` file. 
+<br>
+<br>
+
+> **Note:** If you also run Claude outside the sandbox, set `CLAUDE_CONFIG_DIR=$HOME/.claude` globally too, otherwise the two will use different config locations and diverge.
+
+</details>
 
 
 ### Network restrictions
