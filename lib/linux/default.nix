@@ -1,0 +1,200 @@
+/* mkLinuxSandbox — wraps a binary in a bubblewrap (bwrap) container.
+
+     Bubblewrap creates a lightweight Linux namespace sandbox. It builds an
+     entirely new mount tree from scratch — nothing is visible unless
+     explicitly mounted in. The sandbox also unshares all namespaces (PID,
+     user, IPC, UTS, cgroup) except network.
+
+     ## Filesystem layout inside the sandbox
+
+       Read-only bind mounts:
+         /nix/store/<hash>-... — only the closure of allowedPackages
+                   and pkg, not the entire nix store
+         /etc/passwd   — user identity for programs that need it
+         /etc/resolv.conf — DNS resolution
+         /etc/ssl/certs   — TLS certificate verification
+       Kernel filesystems:
+         /proc   — mounted as a new procfs (only shows sandbox PIDs)
+         /dev    — minimal devtmpfs (null, zero, urandom, etc.)
+       Ephemeral tmpfs (empty, writable, lost on exit):
+         /tmp    — scratch space
+         $HOME   — prevents accidental reads of dotfiles; agent state
+                    dirs are bind-mounted back on top of this
+       Read-only bind mounts:
+         $REPO_ROOT  — the git repo root, so git commands and reads of
+                       files outside CWD work. CWD and GIT_DIR are
+                       mounted rw on top of this.
+       Read-write bind mounts:
+         $CWD        — the project directory (always)
+         stateDirs   — each path gets a --bind (e.g., ~/.config/claude)
+         stateFiles  — each path gets a --bind (e.g., specific rc files)
+         $GIT_DIR    — the .git dir, auto-detected. Needed when CWD is a
+                       worktree and .git/common is outside CWD.
+       Symlinks:
+         /bin/sh -> bash — many scripts assume /bin/sh exists
+
+     ## Key bwrap flags
+
+       --unshare-all  Unshare every namespace type (mount, PID, user, IPC,
+                      UTS, cgroup). The process is fully isolated.
+       --share-net    Re-share the network namespace (undoes the network
+                      part of --unshare-all). Required for API calls.
+       --die-with-parent  Kill the sandbox if the parent shell exits, so
+                          orphaned sandboxes don't accumulate.
+       --setenv       Set environment variables inside the sandbox. PATH
+                      is explicitly constructed from allowedPackages, so
+                      only those binaries are callable.
+
+     ## Debugging tips
+
+       "No such file or directory":
+         The binary is trying to access a path that isn't mounted.
+         Run the wrapper with `strace -f -e trace=openat` to find the
+         path, then add it to stateDirs/stateFiles.
+
+       "Operation not permitted" on /proc or /dev:
+         Unprivileged user namespaces may be disabled on the host.
+         Check: sysctl kernel.unprivileged_userns_clone (needs to be 1).
+
+       Git operations fail:
+         If CWD is a git worktree, the real .git/common dir lives
+         elsewhere. The wrapper auto-detects this with git rev-parse
+         --git-common-dir, but it fails silently if git isn't available
+         outside the sandbox. Check that $GIT_BIND is non-empty.
+
+       DNS/TLS failures:
+         Ensure /etc/resolv.conf and /etc/ssl/certs exist on the host.
+         NixOS symlinks these — if the target is outside /etc, you may
+         need to bind-mount the real paths.
+*/
+{ pkgs, shared }:
+{ pkg, binName, outName, allowedPackages, stateDirs ? [ ], stateFiles ? [ ]
+, extraEnv ? { }, restrictNetwork ? false, allowedDomains ? [ ] }:
+let
+  bashWrapper = shared.bashWrapper;
+  implicitPackages = [ pkgs.cacert bashWrapper ];
+  pathStr = pkgs.lib.makeBinPath (allowedPackages ++ implicitPackages);
+  mkDirsStr = builtins.concatStringsSep "\n"
+    (map (dir: ''mkdir -p "${dir}"'') stateDirs);
+  mkFilesStr = builtins.concatStringsSep "\n"
+    (map (file: ''touch "${file}"'') stateFiles);
+  bindDirsStr = builtins.concatStringsSep " "
+    (map (dir: ''--bind "${dir}" "${dir}"'') stateDirs);
+  # Adds each stateDir to the BOUND_PREFIXES shell array at runtime
+  stateDirsBoundPrefixBashStr = builtins.concatStringsSep "\n"
+    (map (dir: ''BOUND_PREFIXES+=("${dir}")'') stateDirs);
+
+  symlinkHelpers = import ./symlink-helpers.nix { pkgs = pkgs; };
+
+  symlinkResolutionBashStr = ''
+    # Complete the set of already-bound path prefixes
+    ${stateDirsBoundPrefixBashStr}
+    BOUND_PREFIXES+=("$CWD")
+    BOUND_PREFIXES+=("/etc/resolv.conf" "/etc/passwd" "/etc/ssl/certs" "/etc/static" "/etc/pki")
+    [[ -n "$REPO_ROOT" ]] && BOUND_PREFIXES+=("$REPO_ROOT")
+    [[ -n "$GIT_DIR" ]] && BOUND_PREFIXES+=("$GIT_DIR")
+
+    ${symlinkHelpers.isAlreadyBoundBashStr}
+    ${symlinkHelpers.addSymlinkTargetBashStr}
+    ${symlinkHelpers.followSymlinkChainBashStr}
+
+    # Resolve stateFile symlinks — bind resolved targets, not the symlink paths
+    STATE_FILE_BINDS=""
+    ${builtins.concatStringsSep "\n"
+    (map symlinkHelpers.mkResolveFileBashStr stateFiles)}
+
+    # Scan stateDirs for internal symlinks and bind their resolved targets
+    ${builtins.concatStringsSep "\n"
+    (map symlinkHelpers.mkScanDirBashStr stateDirs)}
+  '';
+
+  extraEnvStr = builtins.concatStringsSep " "
+    (map (name: "--setenv ${name} ${builtins.toJSON extraEnv.${name}}")
+      (builtins.attrNames extraEnv));
+
+  conditionalNetworkingParams = import ./networking.nix {
+    pkgs = pkgs; shared = shared; restrictNetwork = restrictNetwork; allowedDomains = allowedDomains;
+  };
+
+  # cacert and bashWrapper are always included: cacert so SSL/TLS
+  # verification works, bashWrapper so the hardcoded SHELL and
+  # /bin/sh symlink targets are always reachable in the store closure.
+  # bashWrapper forces --norc --noprofile on every bash invocation so
+  # that the sandboxed process cannot source /etc/bashrc or /etc/profile.
+  closurePathsFile =
+    pkgs.writeClosure (allowedPackages ++ implicitPackages ++ [ pkg ]);
+
+  gitDetectionBashStr = ''
+    GIT_BIND=""
+    REPO_BIND=""
+    if GIT_DIR=$(${pkgs.git}/bin/git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+      GIT_BIND="--bind $GIT_DIR $GIT_DIR"
+      REPO_ROOT=$(dirname "$GIT_DIR")
+      REPO_BIND="--ro-bind $REPO_ROOT $REPO_ROOT"
+    fi
+  '';
+
+in pkgs.writeTextFile {
+  name = outName;
+  executable = true;
+  destination = "/bin/${outName}";
+  text = ''
+    #!${pkgs.bashInteractive}/bin/bash
+    CWD=$(pwd)
+    ${conditionalNetworkingParams.warnIgnoredDomainsBashStr}
+    ${mkDirsStr}
+    ${mkFilesStr}
+    ${gitDetectionBashStr}
+
+    # Build per-path ro-bind flags for the nix store closure
+    CLOSURE_BINDS=""
+    BOUND_PREFIXES=()
+    while IFS= read -r storePath; do
+      CLOSURE_BINDS="$CLOSURE_BINDS --ro-bind $storePath $storePath"
+      BOUND_PREFIXES+=("$storePath")
+    done < ${closurePathsFile}
+
+    ${symlinkResolutionBashStr}
+    ${conditionalNetworkingParams.proxyStartupBashStr}
+    ${conditionalNetworkingParams.bashTrapCleanupStr}
+    ${conditionalNetworkingParams.sandboxExecBashStr}${pkgs.bubblewrap}/bin/bwrap \
+      ${conditionalNetworkingParams.etcResolvBind} \
+      --tmpfs /nix/store \
+      $CLOSURE_BINDS \
+      --ro-bind /etc/passwd /etc/passwd \
+      --ro-bind-try /etc/ssl/certs /etc/ssl/certs \
+      --ro-bind-try /etc/static /etc/static \
+      --ro-bind-try /etc/pki /etc/pki \
+      --proc /proc \
+      --dev /dev \
+      --tmpfs /tmp \
+      --tmpfs "$HOME" \
+      $REPO_BIND \
+      --bind "$CWD" "$CWD" \
+      ${bindDirsStr} \
+      $STATE_FILE_BINDS \
+      $SYMLINK_PARENT_DIRS \
+      $readonlyStateFileSymlinks \
+      $readWriteStateFileSymlinks \
+      $GIT_BIND \
+      --symlink ${bashWrapper}/bin/bash /bin/sh \
+      --unshare-all \
+      --uid "$(id -u)" \
+      --gid "$(id -g)" \
+      --share-net \
+      --die-with-parent \
+      --chdir "$CWD" \
+      --clearenv \
+      --setenv HOME "$HOME" \
+      --setenv TERM "$TERM" \
+      --setenv SHELL "${bashWrapper}/bin/bash" \
+      --setenv PATH "${pathStr}" \
+      --setenv SSL_CERT_DIR "${pkgs.cacert}/etc/ssl/certs" \
+      --setenv TMPDIR /tmp \
+      ${conditionalNetworkingParams.sslCertEnvBubblewrapStr} \
+      ${conditionalNetworkingParams.caCertBubblewrapStr} \
+      ${conditionalNetworkingParams.proxyEnvBubblewrapStr} \
+      ${extraEnvStr} \
+      ${pkg}/bin/${binName} "$@"
+  '';
+}
