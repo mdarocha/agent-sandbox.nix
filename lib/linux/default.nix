@@ -83,9 +83,21 @@ let
   implicitPackages = [ pkgs.cacert bashWrapper envWrapper ];
   pathStr = pkgs.lib.makeBinPath (allowedPackages ++ implicitPackages);
   mkDirsStr = builtins.concatStringsSep "\n"
-    (map (dir: ''mkdir -p "${dir}"'') stateDirs);
+    (map (dir: ''
+      if [ -e "${dir}" ] && [ ! -d "${dir}" ]; then
+        :
+      else
+        mkdir -p "${dir}"
+      fi
+    '') stateDirs);
   mkFilesStr = builtins.concatStringsSep "\n"
-    (map (file: ''touch "${file}"'') stateFiles);
+    (map (file: ''
+      if [ -e "${file}" ] && [ -d "${file}" ]; then
+        :
+      else
+        touch "${file}"
+      fi
+    '') stateFiles);
   bindDirsStr = builtins.concatStringsSep " "
     (map (dir: ''--bind "${dir}" "${dir}"'') stateDirs);
   # Adds each stateDir to the BOUND_PREFIXES shell array at runtime
