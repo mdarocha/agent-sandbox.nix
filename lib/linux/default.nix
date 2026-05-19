@@ -72,7 +72,15 @@
 , extraEnv ? { }, restrictNetwork ? false, allowedDomains ? [ ] }:
 let
   bashWrapper = shared.bashWrapper;
-  implicitPackages = [ pkgs.cacert bashWrapper ];
+  envWrapper = pkgs.runCommand "env-wrapper" { } ''
+    mkdir -p $out/bin
+    cat > $out/bin/env <<'EOF'
+    #!${pkgs.bashInteractive}/bin/bash
+    exec ${pkgs.coreutils}/bin/env "$@"
+    EOF
+    chmod +x $out/bin/env
+  '';
+  implicitPackages = [ pkgs.cacert bashWrapper envWrapper ];
   pathStr = pkgs.lib.makeBinPath (allowedPackages ++ implicitPackages);
   mkDirsStr = builtins.concatStringsSep "\n"
     (map (dir: ''mkdir -p "${dir}"'') stateDirs);
@@ -177,6 +185,9 @@ in pkgs.writeTextFile {
       $readonlyStateFileSymlinks \
       $readWriteStateFileSymlinks \
       $GIT_BIND \
+      --dir /usr \
+      --dir /usr/bin \
+      --symlink ${envWrapper}/bin/env /usr/bin/env \
       --symlink ${bashWrapper}/bin/bash /bin/sh \
       --unshare-all \
       --uid "$(id -u)" \

@@ -22,6 +22,8 @@ echo
 # --- Linux-specific tests ---
 expect_ok "/etc is writable tmpfs (ephemeral)" "touch /etc/test && rm /etc/test"
 expect_fail "cannot read host /etc/shadow" "cat /etc/shadow"
+expect_ok "/usr/bin/env is executable" "/usr/bin/env true"
+expect_ok "shebang via /usr/bin/env works" "printf '#!/usr/bin/env bash\nexit 0\n' > ./env-shebang-test && chmod +x ./env-shebang-test && ./env-shebang-test"
 
 print_results
 exit_status
