@@ -253,8 +253,22 @@ let
   symlinkStateDirsStr = mkSymlinkHomeMappingStr stateDirParams;
   symlinkStateFilesStr = mkSymlinkHomeMappingStr stateFileParams;
 
-  mkDirsStr = builtins.concatStringsSep "\n" (map (dir: ''mkdir -p "${dir}"'') stateDirs);
-  mkFilesStr = builtins.concatStringsSep "\n" (map (file: ''touch "${file}"'') stateFiles);
+  mkDirsStr = builtins.concatStringsSep "\n"
+    (map (dir: ''
+      if [ -e "${dir}" ] && [ ! -d "${dir}" ]; then
+        :
+      else
+        mkdir -p "${dir}"
+      fi
+    '') stateDirs);
+  mkFilesStr = builtins.concatStringsSep "\n"
+    (map (file: ''
+      if [ -e "${file}" ] && [ -d "${file}" ]; then
+        :
+      else
+        touch "${file}"
+      fi
+    '') stateFiles);
 
   extraEnvInlineStr = builtins.concatStringsSep " \\\n        " (
     map (name: "${name}=${builtins.toJSON extraEnv.${name}}") (builtins.attrNames extraEnv)

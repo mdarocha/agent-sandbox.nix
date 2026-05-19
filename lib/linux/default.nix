@@ -98,8 +98,22 @@ let
     ::1       localhost
   '';
   pathStr = pkgs.lib.makeBinPath (allowedPackages ++ implicitPackages);
-  mkDirsStr = builtins.concatStringsSep "\n" (map (dir: ''mkdir -p "${dir}"'') stateDirs);
-  mkFilesStr = builtins.concatStringsSep "\n" (map (file: ''touch "${file}"'') stateFiles);
+  mkDirsStr = builtins.concatStringsSep "\n"
+    (map (dir: ''
+      if [ -e "${dir}" ] && [ ! -d "${dir}" ]; then
+        :
+      else
+        mkdir -p "${dir}"
+      fi
+    '') stateDirs);
+  mkFilesStr = builtins.concatStringsSep "\n"
+    (map (file: ''
+      if [ -e "${file}" ] && [ -d "${file}" ]; then
+        :
+      else
+        touch "${file}"
+      fi
+    '') stateFiles);
   bindDirsStr = builtins.concatStringsSep " " (map (dir: ''--bind "${dir}" "${dir}"'') stateDirs);
   # Adds each stateDir to the BOUND_PREFIXES shell array at runtime
   stateDirsBoundPrefixBashStr = builtins.concatStringsSep "\n" (
