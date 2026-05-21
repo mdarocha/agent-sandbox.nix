@@ -225,9 +225,6 @@ If the agent fails to perform a tool call, or file read/write, the sandbox is li
 
 The easiest way to explore the sandbox environment is to wrap `bash` itself with the same config as your agent and poke around interactively.
 
-<details>
-<summary><strong>Interactive debugging with a sandboxed bash</strong></summary>
-
 ```nix
 # mirror your agent's config
 bash-sandboxed = sandbox.mkSandbox {
@@ -258,8 +255,6 @@ curl https://example.com          # blocked domain — should fail
 ```
 
 See [`debug/bash.shell.nix`](debug/bash.shell.nix) for a ready-to-use template (has `restrictNetwork = true` with `httpbin.org` allowed for testing).
-
-</details>
 
 **Network issues:** If `restrictNetwork = true` and requests are failing, check which domains are being blocked:
 ```bash
