@@ -259,6 +259,8 @@ curl https://example.com          # blocked domain — should fail
 
 See [`debug/bash.shell.nix`](debug/bash.shell.nix) for a ready-to-use template (has `restrictNetwork = true` with `httpbin.org` allowed for testing).
 
+</details>
+
 **Network issues:** If `restrictNetwork = true` and requests are failing, check which domains are being blocked:
 ```bash
 tail -f /tmp/sandbox-proxy.log
@@ -269,8 +271,6 @@ You may need to add them to `allowedDomains`.
 ```bash
 log show --predicate 'eventMessage CONTAINS "deny"' --last 1m
 ```
-
-</details>
 
 If you are unable to debug, or suspect the AI can't access a file or folder it should have access to by default, please raise an issue.
 
