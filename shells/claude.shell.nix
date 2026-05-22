@@ -41,6 +41,17 @@ let
       GIT_COMMITTER_NAME = "claude";
       GIT_COMMITTER_EMAIL = "claude@localhost";
     };
+    # Optional: run a script before the sandbox starts to inject env vars.
+    # The primary use case is direnv — activate the project's devShell so
+    # its tools are available inside the sandbox alongside allowedPackages:
+    #
+    #   shellHook = ''
+    #     eval "$(direnv export bash)"
+    #   '';
+    #
+    # Requires: direnv allow has been run in the project directory.
+    # When shellHook is set, /nix/store is fully bind-mounted (read-only)
+    # so devShell store paths are accessible inside the sandbox.
     restrictNetwork = true;
     allowedDomains = {
       "anthropic.com" = "*";

@@ -2,11 +2,14 @@
 # mkDarwinSandbox. Per-closure store-path rules are appended at Nix build time
 # by the runCommand builder in default.nix.
 #
-# Arguments:
 #   networkRulesStr      — (allow network*) or restricted-proxy rules
 #   allowReadWriteExecStr — per-stateDir allow rules  (subpath, file-read/write/exec)
 #   allowFilesStr        — per-stateFile allow rules  (literal, file-read/write)
-{ networkRulesStr, allowReadWriteExecStr, allowFilesStr }: ''
+#   nixStoreExecStr      — (allow process-exec (subpath "/nix/store")) when shellHook
+#                          is set; empty string otherwise. When shellHook is active
+#                          the wrapper mounts the entire store, so exec must be
+#                          permitted from arbitrary store paths.
+{ networkRulesStr, allowReadWriteExecStr, allowFilesStr, nixStoreExecStr ? "" }: ''
   (version 1)
   (deny default)
 
@@ -15,12 +18,14 @@
   (allow signal)
   (allow sysctl-read)
 
-  ;; Process execution — per-store-path rules are appended by the builder
+  ;; Process execution — per-store-path rules are appended by the builder.
+  ;; When shellHook is set, nixStoreExecStr allows exec from the whole store.
   (allow process-exec (subpath (param "CWD")))
   (allow process-exec (literal "/bin/sh"))
   (allow process-exec (literal "/bin/bash"))
   (allow process-exec (literal "/usr/bin/env"))
   (allow process-exec (literal "/usr/bin/plutil"))
+  ${nixStoreExecStr}
 
   ;; Mach IPC — scoped to system services, security framework, FSEvents
   (allow mach-lookup (global-name-prefix "com.apple.system."))

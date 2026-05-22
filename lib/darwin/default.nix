@@ -144,7 +144,8 @@
 */
 { pkgs, shared }:
 { pkg, binName, outName, allowedPackages, stateDirs ? [ ], stateFiles ? [ ]
-, extraEnv ? { }, restrictNetwork ? false, allowedDomains ? [ ] }:
+, extraEnv ? { }, restrictNetwork ? false, allowedDomains ? [ ]
+, shellHook ? "" }:
 let
   bashWrapper = shared.bashWrapper;
   implicitPackages = [ pkgs.cacert bashWrapper ];
@@ -219,6 +220,64 @@ let
     (map (name: "${name}=${builtins.toJSON extraEnv.${name}}")
       (builtins.attrNames extraEnv));
 
+  # Seatbelt rule that permits process-exec from the whole nix store.
+  # Only active when shellHook is set: the hook may add store paths to PATH
+  # (e.g. via direnv devShell) that are not in the pre-computed closure.
+  nixStoreExecStr = if shellHook != "" then
+    ''(allow process-exec (subpath "/nix/store"))''
+  else "";
+
+  # Source the shellHook outside the sandbox, snapshot env before/after, and
+  # collect new or changed exports to inject into the sandbox.
+  # PATH changes are handled separately: hook PATH entries are prepended to
+  # pathStr so both devShell tools and allowedPackages binaries are available.
+  # Vars the sandbox manages itself (HOME, TERM, SHELL, etc.) are excluded.
+  # extraEnv entries are applied after hook exports so explicit config wins.
+  shellHookBashStr = if shellHook != ""
+    then
+      let hookFile = pkgs.writeText "sandbox-shell-hook" shellHook;
+      in ''
+        # Source the shellHook and collect env vars it exports.
+        _PRE_HOOK_PATH="$PATH"
+        declare -A _PRE_HOOK_ENV
+        while IFS= read -r -d "" _hook_entry; do
+          _hook_k="''${_hook_entry%%=*}"
+          _PRE_HOOK_ENV["$_hook_k"]="''${_hook_entry#*=}"
+        done < <(env -0)
+
+        # shellcheck source=/dev/null
+        source "${hookFile}"
+
+        _HOOK_EXTRA_ENV_PAIRS=()
+        _SANDBOX_PATH="${pathStr}"
+        while IFS= read -r -d "" _hook_entry; do
+          _hook_k="''${_hook_entry%%=*}"
+          _hook_v="''${_hook_entry#*=}"
+          # Skip vars the sandbox manages explicitly, and bash internals
+          case "$_hook_k" in
+            HOME|TERM|SHELL|PATH|SSL_CERT_DIR|NIX_SSL_CERT_FILE|TMPDIR) continue ;;
+            SHLVL|_|OLDPWD|PWD|BASH_VERSINFO|BASH_VERSION|PPID|EUID|UID) continue ;;
+            GROUPS|BASHOPTS|SHELLOPTS|IFS) continue ;;
+          esac
+          # Skip unchanged vars (only pass what the hook actually set)
+          if [[ "''${_PRE_HOOK_ENV[''${_hook_k}]+set}" = "set" ]] && \
+             [[ "''${_PRE_HOOK_ENV[''${_hook_k}]}" = "$_hook_v" ]]; then
+            continue
+          fi
+          _HOOK_EXTRA_ENV_PAIRS+=("$_hook_k=$_hook_v")
+        done < <(env -0)
+
+        # If the hook modified PATH, prepend its additions to the sandbox PATH
+        # so devShell tools are available alongside allowedPackages binaries.
+        if [[ "$PATH" != "$_PRE_HOOK_PATH" ]]; then
+          _SANDBOX_PATH="$PATH:${pathStr}"
+        fi
+      ''
+    else ''
+      _HOOK_EXTRA_ENV_PAIRS=()
+      _SANDBOX_PATH="${pathStr}"
+    '';
+
   conditionalNetworkingParams = import ./networking.nix {
     pkgs = pkgs; shared = shared; restrictNetwork = restrictNetwork; allowedDomains = allowedDomains;
   };
@@ -272,6 +331,7 @@ let
     networkRulesStr = conditionalNetworkingParams.networkSeatbeltRulesStr;
     allowReadWriteExecStr = seatbeltAllowReadWriteExec;
     allowFilesStr = seatbeltAllowFiles;
+    nixStoreExecStr = nixStoreExecStr;
   };
 
   seatbeltProfile = pkgs.runCommand "${outName}-sandbox.sb" {
@@ -303,6 +363,8 @@ in pkgs.writeTextFile {
     # Ensure stateDirs/stateFiles exist while HOME still points at real home
     ${mkDirsStr}
     ${mkFilesStr}
+
+    ${shellHookBashStr}
 
     ${gitDetectionBashStr}
 
@@ -336,13 +398,14 @@ in pkgs.writeTextFile {
       HOME="$SANDBOX_HOME" \
       TERM="$TERM" \
       SHELL="${bashWrapper}/bin/bash" \
-      PATH="${pathStr}" \
+      PATH="$_SANDBOX_PATH" \
       SSL_CERT_DIR="${pkgs.cacert}/etc/ssl/certs" \
       GIT_CONFIG_DIR="$GIT_CONFIG_DIR" \
       TMPDIR=/tmp \
       ${conditionalNetworkingParams.caCertEnvInlineBashStr} \
       ${conditionalNetworkingParams.proxyEnvInlineBashStr} \
       ${extraEnvInlineStr} \
+      "''${_HOOK_EXTRA_ENV_PAIRS[@]}" \
       /usr/bin/sandbox-exec \
       -f "$SANDBOX_PROFILE" \
       -D CWD="$CWD" \
