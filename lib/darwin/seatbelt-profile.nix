@@ -9,9 +9,13 @@
 #   allowReadWriteExecStr — per-rwDir allow rules  (subpath, file-read/write/exec)
 #   allowFilesStr        — per-rwFile allow rules  (literal, file-read/write)
 #   allowReadOnlyStr      — per-roDir allow rules  (subpath, file-read*; no exec)
+#   nixStoreExecStr      — (allow process-exec (subpath "/nix/store")) when shellHook
+#                          is set (and allowNix is false); empty string otherwise.
+#                          Needed because shellHook may add arbitrary store paths to PATH.
 #   allowFilesReadOnlyStr — per-roFile allow rules (literal, file-read*)
 {
   networkRulesStr,
+  nixStoreExecStr ? "",
   nixSupportRulesStr,
   allowReadWriteExecStr,
   allowFilesStr,
@@ -49,6 +53,7 @@
     (sysctl-name-regex #"^kern\.proc\."))  ;; kern.proc.all, kern.proc.pid.*, etc.
 
   ;; Process execution — per-store-path rules are appended by the builder
+  ${nixStoreExecStr}
   (allow process-exec (subpath (param "CWD")))
   (allow process-exec (literal "/bin/sh"))
   (allow process-exec (literal "/bin/bash"))

@@ -173,6 +173,7 @@
   roDirs ? [ ],
   roFiles ? [ ],
   env ? { },
+  shellHook ? "",
   allowedDomains ? null,
   # Internal: maps "host" → "addr:port" so the proxy dials the local address
   # for those hosts instead of resolving the original. Used by the test
@@ -438,6 +439,66 @@ let
     else
       "";
 
+  # Seatbelt rule that permits process-exec from the whole nix store.
+  # Only active when shellHook is set and allowNix is false: the hook may add
+  # store paths to PATH (e.g. via direnv devShell) not in the pre-computed
+  # closure. When allowNix=true, nixSupportRulesStr already grants this.
+  nixStoreExecStr =
+    if shellHook != "" && !allowNix then
+      ''(allow process-exec (subpath "/nix/store"))''
+    else
+      "";
+
+  # When shellHook is provided: source it outside the sandbox, snapshot the
+  # environment before and after, then collect new/changed exports. Those
+  # exports are injected via KEY=VALUE pairs in the env -i invocation.
+  # PATH changes are handled separately: hook-provided PATH entries are
+  # prepended so both devShell tools and allowedPackages binaries are reachable.
+  shellHookBashStr =
+    if shellHook != "" then
+      let
+        hookFile = pkgs.writeText "sandbox-shell-hook" shellHook;
+      in
+      # bash
+      ''
+        _PRE_HOOK_PATH="$PATH"
+        declare -A _PRE_HOOK_ENV
+        while IFS= read -r -d "" _hook_entry; do
+          _hook_k="''${_hook_entry%%=*}"
+          _PRE_HOOK_ENV["$_hook_k"]="''${_hook_entry#*=}"
+        done < <(env -0)
+
+        # shellcheck source=/dev/null
+        source "${hookFile}"
+
+        _HOOK_EXTRA_ENV_PAIRS=()
+        _SANDBOX_PATH="${pathStr}"
+        while IFS= read -r -d "" _hook_entry; do
+          _hook_k="''${_hook_entry%%=*}"
+          _hook_v="''${_hook_entry#*=}"
+          case "$_hook_k" in
+            HOME|TERM|SHELL|PATH|SSL_CERT_DIR|NIX_SSL_CERT_FILE|TMPDIR) continue ;;
+            SHLVL|_|OLDPWD|PWD|BASH_VERSINFO|BASH_VERSION|PPID|EUID|UID) continue ;;
+            GROUPS|BASHOPTS|SHELLOPTS|IFS) continue ;;
+          esac
+          if [[ "''${_PRE_HOOK_ENV[''${_hook_k}]+set}" = "set" ]] && \
+             [[ "''${_PRE_HOOK_ENV[''${_hook_k}]}" = "$_hook_v" ]]; then
+            continue
+          fi
+          _HOOK_EXTRA_ENV_PAIRS+=("$_hook_k=$_hook_v")
+        done < <(env -0)
+
+        if [[ "$PATH" != "$_PRE_HOOK_PATH" ]]; then
+          _SANDBOX_PATH="$PATH:${pathStr}"
+        fi
+      ''
+    else
+      # bash
+      ''
+        _HOOK_EXTRA_ENV_PAIRS=()
+        _SANDBOX_PATH="${pathStr}"
+      '';
+
   # Detect the daemon socket path at runtime (honouring an override) and
   # canonicalize it: the kernel resolves symlinks before invoking the
   # seatbelt hook, so (path-literal …) must hold the resolved path or the
@@ -461,6 +522,7 @@ let
   seatbeltStaticRules = import ./seatbelt-profile.nix {
     networkRulesStr = conditionalNetworkingParams.networkSeatbeltRulesStr;
     nixSupportRulesStr = nixSupportRulesStr;
+    nixStoreExecStr = nixStoreExecStr;
     allowReadWriteExecStr = seatbeltAllowReadWriteExec;
     allowFilesStr = seatbeltAllowFiles;
     allowReadOnlyStr = seatbeltAllowReadOnly;
@@ -510,6 +572,8 @@ builtins.seq
           ${shared.assertBindsExistBashStr { inherit rwDirs rwFiles roDirs roFiles; }}
 
           ${gitDetectionBashStr}
+          ${shellHookBashStr}
+
           ${ttyDetectionBashStr}
           ${nixDaemonSocketBashStr}
 
@@ -548,7 +612,7 @@ builtins.seq
             HOME="$SANDBOX_HOME" \
             TERM="$TERM" \
             SHELL="${bashWrapper}/bin/bash" \
-            PATH="${pathStr}" \
+            PATH="$_SANDBOX_PATH" \
             SSL_CERT_DIR="${pkgs.cacert}/etc/ssl/certs" \
             TMPDIR=/tmp \
             GIT_CONFIG_COUNT="1" \
@@ -557,6 +621,7 @@ builtins.seq
             ${conditionalNetworkingParams.caCertEnvInlineBashStr} \
             ${conditionalNetworkingParams.proxyEnvInlineBashStr} \
             ${extraEnvInlineStr} \
+            "''${_HOOK_EXTRA_ENV_PAIRS[@]}" \
             /usr/bin/sandbox-exec \
             -f "$SANDBOX_PROFILE" \
             -D CWD="$CWD" \

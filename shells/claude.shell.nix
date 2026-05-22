@@ -41,6 +41,17 @@ let
         "HEAD"
       ];
     };
+    # Optional: run a script before the sandbox starts to inject env vars.
+    # Primary use case — activate the project's devShell so its tools are
+    # available inside the sandbox alongside allowedPackages:
+    #
+    #   shellHook = ''
+    #     eval "$(direnv export bash)"
+    #   '';
+    #
+    # Requires: direnv allow has been run for the project's .envrc.
+    # When shellHook is set, /nix/store is fully bind-mounted (read-only)
+    # so devShell store paths are accessible inside the sandbox.
   };
 in
 pkgs.mkShell { packages = [ claude-sandboxed ]; }
