@@ -26,7 +26,7 @@ if restrictNetwork then
       --ro-bind "$_COMBINED_CA_BUNDLE" /tmp/sandbox-ca-bundle.pem --ro-bind "$_CA_CERT_FILE" /tmp/sandbox-ca-cert.pem --setenv SSL_CERT_FILE /tmp/sandbox-ca-bundle.pem --setenv NIX_SSL_CERT_FILE /tmp/sandbox-ca-bundle.pem --setenv NODE_EXTRA_CA_CERTS /tmp/sandbox-ca-cert.pem --setenv REQUESTS_CA_BUNDLE /tmp/sandbox-ca-bundle.pem'';
     proxyStartupBashStr = ''
       # Detect host IP so the pasta namespace can reach the proxy
-      _HOST_IP=$(${pkgs.iproute2}/bin/ip -4 route get 1.1.1.1 2>/dev/null | ${pkgs.gnugrep}/bin/grep -oP 'src \K\S+')
+      _HOST_IP=$(${pkgs.iproute2}/bin/ip -4 route get 1.1.1.1 2>/dev/null | ${pkgs.gawk}/bin/awk '/src/{for(i=1;i<NF;i++) if($i=="src") {print $(i+1); exit}}')
       if [ -z "$_HOST_IP" ]; then
         echo "ERROR: could not determine host IP for pasta network namespace" >&2
         exit 1
