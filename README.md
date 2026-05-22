@@ -66,6 +66,7 @@ If you want to keep the original command name as the alias, change the `outName`
 | `extraEnv` | no | Additional environment variables as an attrset |
 | `restrictNetwork` | no | When `true`, network is limited to `allowedDomains` (default `false`) |
 | `allowedDomains` | no | Domains the sandbox can reach when `restrictNetwork = true`. Attrset mapping domains to `"*"` or a list of HTTP methods, or a list of domain strings (all methods allowed). |
+| `shellHook` | no | A bash script fragment that runs *outside* the sandbox before it starts. Exports from this script are injected into the sandbox. The primary use case is [direnv](#direnv): activating the project's devShell gives the agent exactly the tools the project declares, without adding them to the global `allowedPackages`. See [direnv](#direnv) for details. |
 
 A minimal example — the arguments are the same whether you use a flake or a `shell.nix`:
 
@@ -119,6 +120,41 @@ When `restrictNetwork = true`, all HTTP/HTTPS traffic is routed through a filter
 
 Blocked requests are logged to `/tmp/sandbox-proxy.log`. See [Git](#git) for limitations on SSH-based remotes.
 
+## direnv
+
+[direnv](https://direnv.net/) + a project's `devShell` already solve the per-project toolchain problem for human developers: `cd` into the repo and the right binaries appear on `PATH`. The `shellHook` argument lets you extend the same mechanism to the agent.
+
+When the sandbox starts, `shellHook` is sourced in the host environment (outside the sandbox). Any environment variables it exports are injected into the sandbox. For PATH changes, the hook's additions are **prepended** to the sandbox's built-in PATH, so both devShell tools and `allowedPackages` binaries remain available.
+
+```nix
+mkSandbox {
+  pkg   = pkgs.claude-code;
+  binName = "claude";
+  outName = "claude-sandboxed";
+  # Core agent tools only — language toolchains live in the project's flake.
+  allowedPackages = [ pkgs.coreutils pkgs.git pkgs.jq pkgs.ripgrep pkgs.fd ];
+  stateDirs = [ "$HOME/.claude" ];
+  extraEnv = {
+    CLAUDE_CODE_OAUTH_TOKEN = "$CLAUDE_CODE_OAUTH_TOKEN";
+    CLAUDE_CONFIG_DIR = "$HOME/.claude";
+  };
+  # Activate the project's devShell before entering the sandbox.
+  # direnv exports PATH (and other env vars) from the project's .envrc,
+  # making all devShell packages available to the agent inside the sandbox.
+  shellHook = ''
+    eval "$(direnv export bash)"
+  '';
+};
+```
+
+**Prerequisites:**
+- `direnv` must be installed on the host (not necessarily in `allowedPackages`).
+- `direnv allow` must have been run in the project directory so the `.envrc` is trusted.
+- `nix-direnv` is recommended for faster devShell activation and caching.
+
+**Security note:** When `shellHook` is set, the entire `/nix/store` is bind-mounted read-only into the sandbox (instead of only the closure of `allowedPackages`). The hook-provided PATH additions may reference arbitrary store paths, and those paths must be reachable. The sandbox PATH still controls which binaries are invocable by name; access to the broader store only adds reachability, not ambient privilege.
+
+**What the hook can and cannot set:** `HOME`, `TERM`, `SHELL`, `SSL_CERT_DIR`, and `TMPDIR` are always managed by the sandbox and are never taken from the hook. Explicit `extraEnv` entries take precedence over hook-provided values for the same key.
 ## Authentication
 
 Because `$HOME` is masked, agents cannot reach your system keychain, browser sessions, or SSH keys. The recommended approach is to authenticate via environment variable. Interactive login flows (e.g. `claude /login`, `gh auth login`) may not work inside the sandbox.
