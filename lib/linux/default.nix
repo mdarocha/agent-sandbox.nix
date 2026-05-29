@@ -69,7 +69,7 @@
 */
 { pkgs, shared }:
 { pkg, binName, outName, allowedPackages, stateDirs ? [ ], stateFiles ? [ ]
-, extraEnv ? { }, extraBwrapArgs ? "", restrictNetwork ? false, allowedDomains ? [ ] }:
+, extraEnv ? { }, extraBwrapArgs ? [ ], restrictNetwork ? false, allowedDomains ? [ ] }:
 let
   bashWrapper = shared.bashWrapper;
   envWrapper = pkgs.runCommand "env-wrapper" { } ''
@@ -131,6 +131,8 @@ let
   extraEnvStr = builtins.concatStringsSep " "
     (map (name: "--setenv ${name} ${builtins.toJSON extraEnv.${name}}")
       (builtins.attrNames extraEnv));
+
+  extraBwrapArgsStr = builtins.concatStringsSep " " extraBwrapArgs;
 
   conditionalNetworkingParams = import ./networking.nix {
     pkgs = pkgs; shared = shared; restrictNetwork = restrictNetwork; allowedDomains = allowedDomains;
@@ -218,7 +220,7 @@ in pkgs.writeTextFile {
       ${conditionalNetworkingParams.caCertBubblewrapStr} \
       ${conditionalNetworkingParams.proxyEnvBubblewrapStr} \
       ${extraEnvStr} \
-      ${extraBwrapArgs} \
+      ${extraBwrapArgsStr} \
       ${pkg}/bin/${binName} "$@"
   '';
 }

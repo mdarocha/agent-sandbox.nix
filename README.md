@@ -64,7 +64,7 @@ If you want to keep the original command name as the alias, change the `outName`
 | `stateDirs` | no | Directories the agent can read/write (e.g. `~/.config/claude`) |
 | `stateFiles` | no | Individual files the agent can read/write |
 | `extraEnv` | no | Additional environment variables as an attrset |
-| `extraBwrapArgs` | no | Extra arguments appended to the `bwrap` invocation (Linux only). Useful for optional device/socket mounts, e.g. `"--dev-bind-try /dev/snd /dev/snd"`. |
+| `extraBwrapArgs` | no | List of extra argument strings appended to the `bwrap` invocation (Linux only). Useful for optional device/socket mounts, e.g. `[ "--dev-bind-try /dev/snd /dev/snd" "--bind-try /mnt/wslg /mnt/wslg" ]`. |
 | `restrictNetwork` | no | When `true`, network is limited to `allowedDomains` (default `false`) |
 | `allowedDomains` | no | Domains the sandbox can reach when `restrictNetwork = true`. Attrset mapping domains to `"*"` or a list of HTTP methods, or a list of domain strings (all methods allowed). |
 
