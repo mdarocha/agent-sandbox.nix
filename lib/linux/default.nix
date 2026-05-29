@@ -69,7 +69,7 @@
 */
 { pkgs, shared }:
 { pkg, binName, outName, allowedPackages, stateDirs ? [ ], stateFiles ? [ ]
-, extraEnv ? { }, restrictNetwork ? false, allowedDomains ? [ ] }:
+, extraEnv ? { }, extraBwrapArgs ? "", restrictNetwork ? false, allowedDomains ? [ ] }:
 let
   bashWrapper = shared.bashWrapper;
   envWrapper = pkgs.runCommand "env-wrapper" { } ''
@@ -218,6 +218,7 @@ in pkgs.writeTextFile {
       ${conditionalNetworkingParams.caCertBubblewrapStr} \
       ${conditionalNetworkingParams.proxyEnvBubblewrapStr} \
       ${extraEnvStr} \
+      ${extraBwrapArgs} \
       ${pkg}/bin/${binName} "$@"
   '';
 }
