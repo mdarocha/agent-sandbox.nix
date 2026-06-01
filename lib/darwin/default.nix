@@ -236,10 +236,26 @@ let
       fi
     '';
 
-  # Walk from REPO_ROOT (or CWD if no git repo) up to REAL_HOME,
-  # collecting intermediate directories that need file-read-metadata
-  # for path resolution (realpathSync, lstat, etc.).
+  # Walk from one directory up to an ancestor, collecting intermediate
+  # directories that need file-read-metadata for seatbelt path traversal.
+  # Both arguments are bash expressions (e.g. "$REPO_ROOT", "$REAL_HOME").
+  mkTraversalBashStr = fromDescendant: toAncestor: ''
+    _CURRENT=$(dirname "${fromDescendant}")
+    while [ "$_CURRENT" != "${toAncestor}" ] && [ "$_CURRENT" != "/" ]; do
+      ANCESTOR_DIRS+=("$_CURRENT")
+      _CURRENT=$(dirname "$_CURRENT")
+    done
+  '';
+
+  # Collect ancestors for repo root (or CWD) → REAL_HOME, plus
+  # each stateDir/stateFile → REAL_HOME so symlink targets are reachable.
   ancestorTraversalBashStr =
+    let
+      stateDirTraversals = builtins.concatStringsSep "\n"
+        (map (p: mkTraversalBashStr "$_RESOLVED_${p.name}" "$REAL_HOME") stateDirParams);
+      stateFileTraversals = builtins.concatStringsSep "\n"
+        (map (p: mkTraversalBashStr "$_RESOLVED_${p.name}" "$REAL_HOME") stateFileParams);
+    in
     # bash
     ''
       _WALK_FROM="$REPO_ROOT"
@@ -247,11 +263,9 @@ let
         _WALK_FROM="$CWD"
       fi
       ANCESTOR_DIRS=()
-      _CURRENT=$(dirname "$_WALK_FROM")
-      while [ "$_CURRENT" != "$REAL_HOME" ] && [ "$_CURRENT" != "/" ]; do
-        ANCESTOR_DIRS+=("$_CURRENT")
-        _CURRENT=$(dirname "$_CURRENT")
-      done
+      ${mkTraversalBashStr "$_WALK_FROM" "$REAL_HOME"}
+      ${stateDirTraversals}
+      ${stateFileTraversals}
     '';
 
   # Copy the static seatbelt profile to a temp file and append
