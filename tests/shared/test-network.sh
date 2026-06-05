@@ -144,5 +144,12 @@ expect_fail "host service on non-proxy 127.0.0.1 port unreachable from sandbox" 
 kill "$_HOST_SERVICE_PID" 2>/dev/null || true
 trap - EXIT
 
+# Test 19: localhost resolves inside sandbox without hitting DNS.
+# curl exits 6 ("Couldn't resolve host") on EAI_AGAIN; 7 ("Failed to connect")
+# when resolution succeeds but nothing is listening. Anything other than 6 is a pass.
+run() { "$NET_SHELL" --norc --noprofile -c "$@" >/dev/null 2>&1; }
+expect_ok "localhost resolves inside sandbox (no EAI_AGAIN)" \
+	'curl --noproxy "*" --max-time 2 -o /dev/null http://localhost:19200/; rc=$?; [ "$rc" -ne 6 ]'
+
 print_results
 exit_status
