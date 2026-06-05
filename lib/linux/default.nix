@@ -11,6 +11,7 @@
          /nix/store/<hash>-... — only the closure of allowedPackages
                    and pkg, not the entire nix store
          /etc/passwd   — user identity for programs that need it
+         /etc/hosts    — loopback name resolution (localhost → 127.0.0.1)
          /etc/resolv.conf — DNS resolution
          /etc/ssl/certs   — TLS certificate verification
        Kernel filesystems:
@@ -73,6 +74,10 @@
 let
   bashWrapper = shared.bashWrapper;
   implicitPackages = [ pkgs.cacert bashWrapper ];
+  hostsFile = pkgs.writeText "sandbox-hosts" ''
+    127.0.0.1 localhost
+    ::1       localhost
+  '';
   pathStr = pkgs.lib.makeBinPath (allowedPackages ++ implicitPackages);
   mkDirsStr =
     builtins.concatStringsSep "\n" (map (dir: ''mkdir -p "${dir}"'') stateDirs);
@@ -173,6 +178,7 @@ in pkgs.writeTextFile {
         --tmpfs /nix/store \
         $CLOSURE_BINDS \
         --ro-bind /etc/passwd /etc/passwd \
+        --ro-bind ${hostsFile} /etc/hosts \
         --ro-bind-try /etc/ssl/certs /etc/ssl/certs \
         --ro-bind-try /etc/static /etc/static \
         --ro-bind-try /etc/pki /etc/pki \
