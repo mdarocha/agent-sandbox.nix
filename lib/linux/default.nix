@@ -179,7 +179,7 @@ in pkgs.writeTextFile {
       ${symlinkResolutionBashStr}
       ${conditionalNetworkingParams.proxyStartupBashStr}
       ${conditionalNetworkingParams.bashTrapCleanupStr}
-      ${conditionalNetworkingParams.sandboxExecBashStr}${pkgs.bubblewrap}/bin/bwrap \
+      ${conditionalNetworkingParams.sandboxExecBashStr}${pkgs.coreutils}/bin/env -i ${pkgs.bubblewrap}/bin/bwrap \
         ${conditionalNetworkingParams.etcResolvBind} \
         --tmpfs /nix/store \
         $CLOSURE_BINDS \

@@ -23,5 +23,15 @@ echo
 expect_ok "/etc is writable tmpfs (ephemeral)" "touch /etc/test && rm /etc/test"
 expect_fail "cannot read host /etc/shadow" "cat /etc/shadow"
 
+# --- PID 1 (bwrap) environ is empty (no host env leak via /proc/1/environ) ---
+pid1_environ_size=$("$SHELL" --norc --noprofile -c 'wc -c < /proc/1/environ' 2>/dev/null || echo "error")
+if [ "$pid1_environ_size" = "0" ]; then
+	echo "PASS: /proc/1/environ is empty (bwrap launched with env -i)"
+	PASS=$((PASS + 1))
+else
+	echo "FAIL: /proc/1/environ leaks host env (size=$pid1_environ_size)"
+	FAIL=$((FAIL + 1))
+fi
+
 print_results
 exit_status
