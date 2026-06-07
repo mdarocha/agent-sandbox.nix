@@ -64,5 +64,25 @@ else
 fi
 
 
+# --- /proc/cmdline is masked (no host hostname or kernel version leak) ---
+proc_cmdline=$("$SHELL" --norc --noprofile -c 'cat /proc/cmdline' 2>/dev/null || echo "error")
+if [ -z "$proc_cmdline" ]; then
+	echo "PASS: /proc/cmdline is masked (empty)"
+	PASS=$((PASS + 1))
+else
+	echo "FAIL: /proc/cmdline not masked (got: $proc_cmdline)"
+	FAIL=$((FAIL + 1))
+fi
+
+# --- /proc/sys/kernel/random/boot_id is masked (no stable host fingerprint) ---
+boot_id=$("$SHELL" --norc --noprofile -c 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null || echo "error")
+if [ -z "$boot_id" ]; then
+	echo "PASS: /proc/sys/kernel/random/boot_id is masked (empty)"
+	PASS=$((PASS + 1))
+else
+	echo "FAIL: /proc/sys/kernel/random/boot_id not masked (got: $boot_id)"
+	FAIL=$((FAIL + 1))
+fi
+
 print_results
 exit_status

@@ -78,6 +78,7 @@
 , _proxyRedirects ? { } }:
 let
   bashWrapper = shared.bashWrapper;
+  emptyFile = pkgs.writeText "sandbox-empty" "";
   implicitPackages = [ pkgs.cacert bashWrapper ];
   hostsFile = pkgs.writeText "sandbox-hosts" ''
     127.0.0.1 localhost
@@ -209,6 +210,8 @@ in pkgs.writeTextFile {
         --ro-bind-try /etc/static /etc/static \
         --ro-bind-try /etc/pki /etc/pki \
         --proc /proc \
+        --ro-bind ${emptyFile} /proc/cmdline \
+        --ro-bind ${emptyFile} /proc/sys/kernel/random/boot_id \
         --dev /dev \
         --tmpfs /tmp \
         --tmpfs "$HOME" \
