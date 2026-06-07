@@ -33,5 +33,16 @@ else
 	FAIL=$((FAIL + 1))
 fi
 
+# --- Hostname is neutralised (no UTS namespace leak) ---
+host_hostname=$(uname -n)
+sandbox_hostname=$("$SHELL" --norc --noprofile -c 'uname -n' 2>/dev/null || echo "error")
+if [ "$sandbox_hostname" = "sandbox" ] && [ "$sandbox_hostname" != "$host_hostname" ]; then
+	echo "PASS: hostname inside sandbox is 'sandbox', not host hostname"
+	PASS=$((PASS + 1))
+else
+	echo "FAIL: sandbox hostname is '$sandbox_hostname' (host: '$host_hostname')"
+	FAIL=$((FAIL + 1))
+fi
+
 print_results
 exit_status
