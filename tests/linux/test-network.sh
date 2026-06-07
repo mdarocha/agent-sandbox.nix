@@ -121,5 +121,26 @@ else
 	echo "SKIP: unprivileged ping not available in this namespace; skipping ICMP test" >&2
 fi
 
+# Test: HTTP_PROXY inside a restricted sandbox uses the pasta gateway (10.0.2.2),
+# not the host LAN IP. Checks that fix #1 (proxy IP leak) holds.
+sandbox_proxy=$("$NET_SHELL" --norc --noprofile -c 'echo "$HTTP_PROXY"' 2>/dev/null || echo "")
+if echo "$sandbox_proxy" | grep -q "^http://10\.0\.2\.2:"; then
+	echo "PASS: HTTP_PROXY uses pasta gateway (10.0.2.2), not host LAN IP"
+	PASS=$((PASS + 1))
+else
+	echo "FAIL: HTTP_PROXY is '$sandbox_proxy' (expected http://10.0.2.2:...)"
+	FAIL=$((FAIL + 1))
+fi
+_DETECTED_HOST_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || echo "")
+if [ -n "$_DETECTED_HOST_IP" ]; then
+	if echo "$sandbox_proxy" | grep -qF "$_DETECTED_HOST_IP"; then
+		echo "FAIL: HTTP_PROXY contains host LAN IP ($_DETECTED_HOST_IP)"
+		FAIL=$((FAIL + 1))
+	else
+		echo "PASS: HTTP_PROXY does not contain host LAN IP ($_DETECTED_HOST_IP)"
+		PASS=$((PASS + 1))
+	fi
+fi
+
 print_results
 exit_status

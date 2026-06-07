@@ -6,24 +6,23 @@ let
   pastaGatewayIp = "10.0.2.2";
   pastaNamespaceIp = "10.0.2.1";
   # Route-restriction script runs inside pasta's namespace (before bwrap).
-  # Removes the default route and adds a host-only route so the namespace
-  # can only reach the host machine (where the proxy listens), not the
-  # wider internet.
+  # Removes the default route so the namespace cannot reach the wider
+  # internet directly. The proxy is bound on 127.0.0.1 on the host;
+  # pasta forwards 10.0.2.2:<port> → 127.0.0.1:<port>, so the sandbox
+  # only needs to reach the pasta gateway — the host LAN IP is never needed.
   # Installs an nftables OUTPUT chain with default-drop policy. Only
-  # in-namespace loopback and TCP to the proxy port on the host IP /
-  # pasta gateway are accepted — all other protocols (UDP, ICMP, …)
-  # and non-proxy TCP ports are blocked.
+  # in-namespace loopback and TCP to the proxy port on the pasta gateway
+  # are accepted — all other protocols (UDP, ICMP, …) and non-proxy TCP
+  # ports are blocked.
   routeRestrictScript = pkgs.writeScript "sandbox-route-restrict" ''
     #!${pkgs.bashInteractive}/bin/bash
     set -euo pipefail
     IP="${pkgs.iproute2}/bin/ip"
     NFT="${pkgs.nftables}/bin/nft"
     $IP route del default || { echo "FATAL: could not remove default route" >&2; exit 1; }
-    $IP route add "$SANDBOX_HOST_IP"/32 via ${pastaGatewayIp} || { echo "FATAL: could not add host route" >&2; exit 1; }
     $NFT add table ip sandbox_filter
     $NFT add chain ip sandbox_filter output '{ type filter hook output priority 0 ; policy drop ; }'
     $NFT add rule ip sandbox_filter output oif lo accept
-    $NFT add rule ip sandbox_filter output ip daddr "$SANDBOX_HOST_IP" tcp dport "$SANDBOX_PROXY_PORT" accept
     $NFT add rule ip sandbox_filter output ip daddr ${pastaGatewayIp} tcp dport "$SANDBOX_PROXY_PORT" accept
     exec "$@"
   '';
@@ -32,23 +31,16 @@ in if restrictNetwork then
   in {
     warnIgnoredDomainsBashStr = "";
     proxyEnvBubblewrapStr = ''
-      --setenv HTTP_PROXY "http://$_HOST_IP:$_PROXY_PORT" --setenv HTTPS_PROXY "http://$_HOST_IP:$_PROXY_PORT" --setenv http_proxy "http://$_HOST_IP:$_PROXY_PORT" --setenv https_proxy "http://$_HOST_IP:$_PROXY_PORT"'';
+      --setenv HTTP_PROXY "http://${pastaGatewayIp}:$_PROXY_PORT" --setenv HTTPS_PROXY "http://${pastaGatewayIp}:$_PROXY_PORT" --setenv http_proxy "http://${pastaGatewayIp}:$_PROXY_PORT" --setenv https_proxy "http://${pastaGatewayIp}:$_PROXY_PORT"'';
 
     caCertBubblewrapStr = ''
       --ro-bind "$_COMBINED_CA_BUNDLE" /tmp/sandbox-ca-bundle.pem --ro-bind "$_CA_CERT_FILE" /tmp/sandbox-ca-cert.pem --setenv SSL_CERT_FILE /tmp/sandbox-ca-bundle.pem --setenv NIX_SSL_CERT_FILE /tmp/sandbox-ca-bundle.pem --setenv NODE_EXTRA_CA_CERTS /tmp/sandbox-ca-cert.pem --setenv REQUESTS_CA_BUNDLE /tmp/sandbox-ca-bundle.pem'';
-    proxyStartupBashStr = ''
-      # Detect host IP so the pasta namespace can reach the proxy
-      _HOST_IP=$(${pkgs.iproute2}/bin/ip -4 route get 1.1.1.1 2>/dev/null | ${pkgs.gnugrep}/bin/grep -oP 'src \K\S+')
-      if [ -z "$_HOST_IP" ]; then
-        echo "ERROR: could not determine host IP for pasta network namespace" >&2
-        exit 1
-      fi
-    '' + mkProxyStartupBashStr allowlistFileStr "$_HOST_IP" _proxyRedirects;
+    proxyStartupBashStr = mkProxyStartupBashStr allowlistFileStr "127.0.0.1" _proxyRedirects;
 
     bashCleanupCommandsStr = ''kill $_PROXY_PID 2>/dev/null; rm -f "$_CA_CERT_FILE" "$_COMBINED_CA_BUNDLE"'';
 
     sandboxExecBashStr = ''
-      SANDBOX_HOST_IP="$_HOST_IP" SANDBOX_PROXY_PORT="$_PROXY_PORT" ${pkgs.passt}/bin/pasta -4 --config-net -a ${pastaNamespaceIp} -g ${pastaGatewayIp} -n 255.255.255.0 -t none -u none -T none -U none -- ${routeRestrictScript} '';
+      SANDBOX_PROXY_PORT="$_PROXY_PORT" ${pkgs.passt}/bin/pasta -4 --config-net -a ${pastaNamespaceIp} -g ${pastaGatewayIp} -n 255.255.255.0 -t none -u none -T none -U none -- ${routeRestrictScript} '';
     etcResolvBind =
       "--ro-bind /dev/null /etc/resolv.conf"; # Block DNS resolution when restrictNetwork is true.
     sslCertEnvBubblewrapStr =
