@@ -18,7 +18,13 @@ in if restrictNetwork then
       ;; be pinned to that specific port. This prevents the sandbox from
       ;; reaching other loopback services (local databases, dev servers,
       ;; etc.) directly, bypassing the proxy's domain/method filtering.
-      (allow network-outbound (remote unix-socket))
+      ;;
+      ;; UNIX-socket egress is intentionally NOT allowed: an unrestricted
+      ;; (remote unix-socket) allow lets the sandboxed process connect()
+      ;; to any UNIX socket the host UID can reach (terminal-emulator IPC
+      ;; like Alacritty, per-user launchd listeners under /private/tmp,
+      ;; ssh-agent, etc.). The proxy speaks TCP, so nothing legitimate
+      ;; needs UNIX-socket egress.
       (allow network-bind (local ip "localhost:*"))
       (allow system-socket)
     '';
