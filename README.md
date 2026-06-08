@@ -6,16 +6,18 @@ Prevent your agents in YOLO mode from deleting your $HOME, force pushing to main
 
 The sandbox uses [bubblewrap](https://github.com/containers/bubblewrap) on Linux and sandbox-exec on macOS.
 
+Tested with Claude's frontier models — see [Security](#security) for the threat model and known limits.
+
 ## What the sandbox allows
 
-- Read/write the working directory from which the sandboxed agent is invoked.
-- Read/write explicitly declared state dirs and files.
-- Execution of binaries from `allowedPackages`, plus bash, which is provided by default.
-- Optionally restrict network access to particular domains and HTTP methods.
-- Environment variables from extraEnv (host environment is cleared).
-- Git (via the repository's .git directory), including from within worktrees.
+- **Project directory** — read/write access to the directory you launch the agent from.
+- **Declared state** — read/write access to anything you list in `stateDirs` or `stateFiles`.
+- **Allowed packages** — the binaries you list in `allowedPackages` are on the agent's PATH (plus `bash` and `cacert`).
+- **Network** — unrestricted by default. Set `restrictNetwork = true` to limit access to the domains and methods in `allowedDomains`.
+- **Environment** — only variables you pass via `extraEnv` reach the agent; the host environment is otherwise cleared.
+- **Git** — the repo's `.git` directory is exposed, including when it sits outside the project tree (worktrees).
 
-Everything else is denied. `$HOME` is an ephemeral writable tmpfs on both platforms.
+Everything else is denied. `$HOME` is an ephemeral writable tmpfs that disappears when the sandbox exits.
 
 ## Usage
 
@@ -95,14 +97,13 @@ mkSandbox {
 <summary><strong>Why set <code>CLAUDE_CONFIG_DIR</code> and not add <code>~/.claude.json</code> as a <code>stateFile</code>?</strong></summary>
 <br>
 
-`CLAUDE_CONFIG_DIR` is set to `$HOME/.claude` so that `~/.claude.json` is written inside the read/write `stateDir`. If you instead add `~/.claude.json` as a `stateFile`, when Claude updates configuration it writes temporary files to the ephemeral home root. It then tries to rename these to `~/.claude.json`, which can fail or behave unexpectedly because the temporary files land outside any declared `stateDir` or `stateFile`. This can occasionally corrupt the `~/.claude.json` file. 
+`CLAUDE_CONFIG_DIR` is set to `$HOME/.claude` so that `~/.claude.json` is written inside the read/write `stateDir`. If you instead add `~/.claude.json` as a `stateFile`, when Claude updates configuration it writes temporary files to the ephemeral home root. It then tries to rename these to `~/.claude.json`, which can fail or behave unexpectedly because the temporary files land outside any declared `stateDir` or `stateFile`. This can occasionally corrupt the `~/.claude.json` file.
 <br>
 <br>
 
 > **Note:** If you also run Claude outside the sandbox, set `CLAUDE_CONFIG_DIR=$HOME/.claude` globally too, otherwise the two will use different config locations and diverge.
 
 </details>
-
 
 ### Network restrictions
 
@@ -282,30 +283,65 @@ curl https://example.com          # blocked domain — should fail
 See [`debug/bash.shell.nix`](debug/bash.shell.nix) for a ready-to-use template (has `restrictNetwork = true` with `httpbin.org` allowed for testing).
 
 **Network issues:** If `restrictNetwork = true` and requests are failing, check which domains are being blocked:
+
 ```bash
 tail -f /tmp/sandbox-proxy.log
 ```
+
 You may need to add them to `allowedDomains`.
 
 **macOS:** after a failure, you can query the system log for sandbox denials:
+
 ```bash
 log show --predicate 'eventMessage CONTAINS "deny"' --last 1m
 ```
 
 If you are unable to debug, or suspect the AI can't access a file or folder it should have access to by default, please raise an issue.
 
-## Platform notes
+## Security
 
-**Linux:** Uses bubblewrap to build a temporary, isolated environment. The agent is completely cut off from the host machine (unsharing PID, user, IPC, UTS, and cgroup namespaces) and cannot see your host processes.
+This section explains what the sandbox is and isn't designed to protect against, so you can decide whether it fits your situation.
 
-**macOS:** Uses `sandbox-exec` to enforce a strict "deny-default" security policy.
+### What it protects against
+
+If the agent does something it shouldn't — runs a bad prompt, processes a malicious file, picks up a compromised dependency, or hallucinates a destructive command — the sandbox stops the damage from spreading outside the project directory. Concretely:
+
+- It can't read your SSH keys, browser sessions, password manager, other projects' source code, or anything else in your home directory outside the paths you explicitly expose.
+- It can't delete or modify files outside the project directory and your declared `stateDirs` / `stateFiles`.
+- It can't reach the internet outside the domains you allow (when `restrictNetwork = true`).
+- It can't talk to local services on your laptop — databases, dev servers, the SSH agent, other terminal windows, etc.
+- It can only run the tools you list in `allowedPackages`.
+- It can't see your other running programs, read environment variables they have set, or interfere with other terminals you have open.
+
+### What it doesn't protect against
+
+The sandbox is an **isolation** boundary, not an **anonymity** boundary, and not a defense against an attacker who has already taken over your machine in some other way.
+
+- **The agent can fingerprint your machine.** It can see your hostname, hardware model, CPU, RAM, OS version, and rough network details. If you need the agent to *not know which machine it's running on*, this isn't the tool — you want a VM or a separate device.
+- **Anything you hand the agent, it has.** If you expose your `~/.claude` directory (or any credential file) via `stateDirs`, or pass a token through `extraEnv`, the agent can read it — that's how it logs in. A compromised agent has the same access to those credentials as your shell does. Treat this the way you'd treat handing the token to any other CLI tool you didn't write yourself.
+- **The agent can edit its own sandbox config.** `flake.nix` lives inside the project directory and is writable from inside the sandbox. An agent could weaken its own restrictions for the *next* session. Changes don't take effect until you re-enter the dev shell, so it's worth reviewing `git diff` before you do.
+- **No defense against root or kernel bugs.** If something on your machine has already gained administrator-level access, or there's a deeper bug in the operating system itself, this sandbox can't stop it.
+
+### Specific things worth being aware of
+
+- **Your username and home directory path are visible to the agent.** This is unavoidable — the agent needs to know where `$HOME/.claude` resolves to. If your username is itself sensitive, this isn't the right tool.
+- **All of `/nix/store` is readable, not just your allowed packages.** Only execution is restricted to your allowlist. The Nix store is normally world-readable on any system, so this matches existing behavior, but it does mean the agent can list every package you've built.
+- **`/tmp` is shared with the host.** The agent can see (but not connect to) sockets and files other programs leave there. Don't put secrets in `/tmp` while the sandbox is running.
+
+### Linux vs macOS
+
+Both platforms enforce the same protections — everything in the list above holds equally on Linux and macOS. The mechanisms differ (bubblewrap and pasta on Linux, `sandbox-exec` on macOS), and the specific bits of information an agent can learn about your machine vary a little, but the practical end state is the same on both.
+
+### Is this the right tool for me?
+
+If your threat model is *"I want my AI agent to not accidentally destroy my work, leak my private files, or talk to random places on the internet,"* this sandbox is a good fit.
+
+If your threat model is *"I assume the agent is actively malicious and need it to be unable to identify my specific machine or my real user account,"* you'll want a VM with a throwaway user account or a separate machine.
 
 ## Caveats
 
-- **The agent can modify its own sandbox configuration.** Because the working directory is fully writable, a sandboxed agent can edit `flake.nix` (or any other `.nix` file in the project). Changes to the sandbox config only take effect the next time `nix develop` is run, so the practical risk is low — but it's worth reviewing `git diff` before re-entering the shell if you've run the agent in an untrusted or adversarial context.
 - **`sandbox-exec` is deprecated on macOS.** It remains the only native unprivileged sandboxing mechanism and currently works on macOS 26 (Tahoe) and older, but may break in a future release.
-- **macOS only: symlinks inside `stateDirs` and `stateFiles` must point to already-allowed paths.** Seatbelt follows symlinks to their target — if the target isn't in the Nix store closure or another allowed path, access will be denied. Symlinks into the Nix store will work but are read-only.
-- **Linux only: symlinks inside `stateDirs` and `stateFiles` are only followed into the Nix store.** At startup, the sandbox resolves symlinks in `stateFiles` and scans the top level of each `stateDir` for symlinks, but only binds targets under `/nix/store`. Targets outside the store are ignored with a warning. This prevents an agent from planting a symlink during a session to expand its own sandbox on the next startup (e.g. `~/.claude/evil -> /etc/shadow`). If you need to expose a non-store path that's currently reached via a symlink, declare it explicitly as a `stateDir` or `stateFile`. Symlinks inside `stateDir` subdirectories are not followed at any depth.
+- **Symlinks inside `stateDirs` and `stateFiles` are only followed to already-permitted paths.** A symlink is usable only if its target is the Nix store, the working directory, the Git directory, or another declared `stateDir`/`stateFile`. Anything else is blocked — this prevents an agent from planting a symlink during a session to expand its own sandbox on the next startup (e.g. `~/.claude/evil -> /etc/shadow`). To expose a non-permitted path that's currently reached via a symlink, declare it explicitly as a `stateDir` or `stateFile`. Symlinks into the Nix store are read-only. Platform differences: on Linux, only top-level symlinks inside a `stateDir` are detected (the startup scan is one level deep) and blocked targets produce a `sandbox: WARNING` line on startup; on macOS, symlinks are followed at any depth and denials happen at runtime — check `log show --predicate 'eventMessage CONTAINS "deny"'`.
 - Tested on x86_64-linux and aarch64-darwin. Other architectures should work but are untested.
 
 ## Similar projects
