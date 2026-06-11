@@ -78,6 +78,7 @@
   stateDirs ? [ ],
   stateFiles ? [ ],
   extraEnv ? { },
+  extraBwrapArgs ? [ ],
   restrictNetwork ? false,
   allowedDomains ? [ ],
   # Internal: maps "host" → "addr:port" so the proxy dials the local address
@@ -150,6 +151,8 @@ let
   extraEnvStr = builtins.concatStringsSep " " (
     map (name: "--setenv ${name} ${builtins.toJSON extraEnv.${name}}") (builtins.attrNames extraEnv)
   );
+
+  extraBwrapArgsStr = builtins.concatStringsSep " " extraBwrapArgs;
 
   conditionalNetworkingParams = import ./networking.nix {
     pkgs = pkgs;
@@ -296,6 +299,7 @@ pkgs.writeTextFile {
         ${conditionalNetworkingParams.caCertBubblewrapStr} \
         ${conditionalNetworkingParams.proxyEnvBubblewrapStr} \
         ${extraEnvStr} \
+        ${extraBwrapArgsStr} \
         ${pkg}/bin/${binName} "$@"
     '';
 }
