@@ -253,11 +253,11 @@ pkgs.writeTextFile {
           BOUND_PREFIXES+=("$storePath")
         done < ${closurePathsFile}
 
-      ${symlinkResolutionBashStr}
-      ${sandboxPasswdBashStr}
-      ${conditionalNetworkingParams.proxyStartupBashStr}
-      ${trapBashStr}
-      ${conditionalNetworkingParams.sandboxExecBashStr}${pkgs.coreutils}/bin/env -i ${pkgs.bubblewrap}/bin/bwrap \
+        ${symlinkResolutionBashStr}
+        ${sandboxPasswdBashStr}
+        ${conditionalNetworkingParams.proxyStartupBashStr}
+        ${trapBashStr}
+        ${conditionalNetworkingParams.sandboxExecBashStr}${pkgs.coreutils}/bin/env -i ${pkgs.bubblewrap}/bin/bwrap \
         ${conditionalNetworkingParams.etcResolvBind} \
         --tmpfs /nix/store \
         $CLOSURE_BINDS \
