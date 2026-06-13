@@ -102,7 +102,7 @@ let
       legacyArgHints = {
         restrictNetwork =
           if restrictNetwork != null then
-            "The 'restrictNetwork' argument is deprecated. Network access is now controlled by 'allowedDomains' alone:\n  - omit it for open internet\n  - set a list/attrset to filter\n  - set to [] to block all\nSee the migration guide: https://github.com/archie-judd/agent-sandbox.nix"
+            "The 'restrictNetwork' argument is deprecated. Network access is now controlled by 'allowedDomains' alone:\n  - omit it for open internet\n  - set a list/attrset to filter\n  - set to [] to block all\nSee the migration guide: https://github.com/archie-judd/agent-sandbox.nix/blob/main/README.md#v0x-to-v1x-migration-guide"
           else
             null;
         extraEnv =
