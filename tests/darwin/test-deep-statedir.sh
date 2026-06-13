@@ -21,6 +21,11 @@ trap 'rm -rf "$TESTDIR" "$HOME/.tmp-test-deep-statedir"' EXIT
 cd "$TESTDIR"
 git init -q
 
+# Pre-create the rwDir / rwFile declared by deep-statedir-sandbox.nix. The
+# wrapper no longer creates declared bind paths automatically.
+mkdir -p "$HOME/.tmp-test-deep-statedir/a/b/c/data"
+touch "$HOME/.tmp-test-deep-statedir/a/b/c/config.json"
+
 run() { "$SHELL" --norc --noprofile -c "$@" >/dev/null 2>&1; }
 run_output() { "$SHELL" --norc --noprofile -c "$@" 2>/dev/null; }
 
