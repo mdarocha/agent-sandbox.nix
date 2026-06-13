@@ -102,7 +102,7 @@ mkSandbox {
   outName = "claude-sandboxed";
   allowedPackages = [ pkgs.coreutils pkgs.git pkgs.ripgrep ];
   rwDirs = [ "$HOME/.claude" ];
-  rwFiles = [ ];
+  roFiles = [ "$HOME/.config/git/config" ];
   env = {
     CLAUDE_CODE_OAUTH_TOKEN = "$CLAUDE_CODE_OAUTH_TOKEN";
     CLAUDE_CONFIG_DIR = "$HOME/.claude";
