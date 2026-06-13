@@ -8,8 +8,8 @@ The sandbox uses [bubblewrap](https://github.com/containers/bubblewrap) on Linux
 
 Tested with Claude's frontier models — see [Security](#security) for the threat model and known limits.
 
-<details>
-<summary><strong>V0.x -> V1.x Migration guide</strong></summary>
+<details id="#v0x-to-v1x-migration-guide">
+<summary><strong>V0.x to V1.x migration guide</strong></summary>
 <br>
 
 A few arguments were renamed, and `restrictNetwork` was removed. If you use an old name you'll get a clear error telling you the new one. Update your config like this:
