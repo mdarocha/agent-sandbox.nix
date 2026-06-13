@@ -21,6 +21,11 @@ echo "out-of-bounds content" > "$OOB_FILE"
 trap 'rm -rf "$TESTDIR" "$OOB_FILE"' EXIT
 cd "$TESTDIR"
 
+# Pre-create the rwDir / rwFile declared by symlinks-sandbox.nix. The wrapper
+# no longer creates declared bind paths automatically.
+mkdir -p "$HOME/.test-state-dir"
+touch "$HOME/.test-state-file"
+
 echo "=== rwDir/rwFile and symlink resolution tests (Linux) ==="
 echo
 

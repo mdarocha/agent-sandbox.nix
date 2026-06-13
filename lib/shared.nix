@@ -91,6 +91,40 @@ let
       _COMBINED_CA_BUNDLE=$(mktemp /tmp/sandbox-ca-bundle.XXXXXX)
       cat ${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt "$_CA_CERT_FILE" > "$_COMBINED_CA_BUNDLE"
     '';
+  # Emits a bash snippet that checks every declared rwDir / rwFile exists on
+  # the host before the sandbox launches. Missing paths are accumulated and
+  # reported in one go; the snippet exits 1 if any were missing. Uses
+  # `[ -e ]` so a broken symlink also counts as missing — the wrapper used
+  # to silently `mkdir -p` / `touch` declared paths, which masked typos
+  # like `rwDirs = [ "$HOME/.cluade" ]` as new state directories. The
+  # check is emitted as bash (not evaluated in Nix) because paths reference
+  # shell vars (`$HOME`, etc.) that are only resolved at runtime.
+  assertBindsExistBashStr =
+    {
+      rwDirs,
+      rwFiles,
+    }:
+    let
+      mkCheck =
+        label: p:
+        # bash
+        ''
+          if [ ! -e "${p}" ]; then
+            echo "${errorPrefix} ${p}: declared as ${label} but does not exist" >&2
+            _BIND_MISSING=1
+          fi'';
+      dirChecks = map (mkCheck "rwDir") rwDirs;
+      fileChecks = map (mkCheck "rwFile") rwFiles;
+      allChecks = builtins.concatStringsSep "\n" (dirChecks ++ fileChecks);
+    in
+    # bash
+    ''
+      _BIND_MISSING=0
+      ${allChecks}
+      if [ "$_BIND_MISSING" -ne 0 ]; then
+        exit 1
+      fi
+    '';
   assertNoLegacyArgs =
     {
       restrictNetwork,
@@ -132,4 +166,5 @@ in
   warnPrefix = warnPrefix;
   errorPrefix = errorPrefix;
   assertNoLegacyArgs = assertNoLegacyArgs;
+  assertBindsExistBashStr = assertBindsExistBashStr;
 }

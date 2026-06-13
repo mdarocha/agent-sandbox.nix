@@ -108,8 +108,6 @@ let
     ::1       localhost
   '';
   pathStr = pkgs.lib.makeBinPath (allowedPackages ++ implicitPackages);
-  mkDirsStr = builtins.concatStringsSep "\n" (map (dir: ''mkdir -p "${dir}"'') rwDirs);
-  mkFilesStr = builtins.concatStringsSep "\n" (map (file: ''touch "${file}"'') rwFiles);
   bindDirsStr = builtins.concatStringsSep " " (map (dir: ''--bind "${dir}" "${dir}"'') rwDirs);
   # Adds each rwDir to the BOUND_PREFIXES shell array at runtime
   stateDirsBoundPrefixBashStr = builtins.concatStringsSep "\n" (
@@ -243,8 +241,7 @@ builtins.seq
         ''
           #!${pkgs.bashInteractive}/bin/bash
             CWD=$(pwd)
-            ${mkDirsStr}
-            ${mkFilesStr}
+            ${shared.assertBindsExistBashStr { inherit rwDirs rwFiles; }}
             ${gitDetectionBashStr}
 
             # Build per-path ro-bind flags for the nix store closure

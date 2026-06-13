@@ -21,6 +21,11 @@ TESTDIR=$(mktemp -d "$TESTDIR_ROOT/system-volumes-data-denied.XXXXXX")
 trap 'rm -rf "$TESTDIR"' EXIT
 cd "$TESTDIR"
 
+# Pre-create the rwDir / rwFile declared by basic-sandbox.nix. The wrapper no
+# longer creates declared bind paths automatically.
+mkdir -p "$HOME/.test-state-dir"
+touch "$HOME/.test-state-file"
+
 echo "=== /System/Volumes/* denied (Darwin) ==="
 echo
 

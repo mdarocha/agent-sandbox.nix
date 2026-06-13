@@ -259,9 +259,6 @@ let
   symlinkStateDirsStr = mkSymlinkHomeMappingStr stateDirParams;
   symlinkStateFilesStr = mkSymlinkHomeMappingStr stateFileParams;
 
-  mkDirsStr = builtins.concatStringsSep "\n" (map (dir: ''mkdir -p "${dir}"'') rwDirs);
-  mkFilesStr = builtins.concatStringsSep "\n" (map (file: ''touch "${file}"'') rwFiles);
-
   extraEnvInlineStr = builtins.concatStringsSep " \\\n        " (
     map (name: "${name}=${builtins.toJSON env.${name}}") (builtins.attrNames env)
   );
@@ -421,9 +418,7 @@ builtins.seq
           #!${pkgs.bashInteractive}/bin/bash
           CWD=$(pwd)
 
-          # Ensure rwDirs/rwFiles exist while HOME still points at real home
-          ${mkDirsStr}
-          ${mkFilesStr}
+          ${shared.assertBindsExistBashStr { inherit rwDirs rwFiles; }}
 
           ${gitDetectionBashStr}
           ${ttyDetectionBashStr}

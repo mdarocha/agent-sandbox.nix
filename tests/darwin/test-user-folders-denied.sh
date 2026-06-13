@@ -19,6 +19,11 @@ TESTDIR=$(mktemp -d "$TESTDIR_ROOT/user-folders-denied.XXXXXX")
 trap 'rm -rf "$TESTDIR"' EXIT
 cd "$TESTDIR"
 
+# Pre-create the rwDir / rwFile declared by basic-sandbox.nix. The wrapper no
+# longer creates declared bind paths automatically.
+mkdir -p "$HOME/.test-state-dir"
+touch "$HOME/.test-state-file"
+
 # Resolve the host's per-user temp/cache dirs OUTSIDE the sandbox. The
 # sandboxed getconf returns the same string (confstr is a libc query, not
 # a filesystem op), but we want the real path for the assertions.
