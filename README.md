@@ -8,7 +8,22 @@ The sandbox uses [bubblewrap](https://github.com/containers/bubblewrap) on Linux
 
 Tested with Claude's frontier models — see [Security](#security) for the threat model and known limits.
 
-<details id="#v0x-to-v1x-migration-guide">
+## What the sandbox allows
+
+- **Project directory** — read/write access to the directory you launch the agent from.
+- **Declared state** — read/write access to anything you list in `rwDirs` or `rwFiles`.
+- **Allowed packages** — the binaries you list in `allowedPackages` are on the agent's PATH (plus `bash` and `cacert`).
+- **Network** — unrestricted by default. Set `allowedDomains` to limit the agent to specific domains (and, optionally, specific HTTP methods).
+- **Environment** — only variables you pass via `env` reach the agent; the host environment is otherwise cleared.
+- **Git** — the repo's `.git` directory is exposed, including when it sits outside the project tree (worktrees).
+
+Everything else is denied. `$HOME` is an ephemeral writable tmpfs that disappears when the sandbox exits.
+
+## Usage
+
+The quickest way to get started is with a flake template. If you prefer a `shell.nix`, see [`shells/`](shells/) for ready-to-use examples. Authentication is covered [below](#authentication).
+
+<details id="v0x-to-v1x-migration-guide">
 <summary><strong>V0.x to V1.x migration guide</strong></summary>
 <br>
 
@@ -26,21 +41,6 @@ A few arguments were renamed, and `restrictNetwork` was removed. If you use an o
 Network access is now controlled by `allowedDomains` on its own: leave it unset for open internet, list the domains you want to allow, or use `[ ]` to block everything.
 
 </details>
-
-## What the sandbox allows
-
-- **Project directory** — read/write access to the directory you launch the agent from.
-- **Declared state** — read/write access to anything you list in `rwDirs` or `rwFiles`.
-- **Allowed packages** — the binaries you list in `allowedPackages` are on the agent's PATH (plus `bash` and `cacert`).
-- **Network** — unrestricted by default. Set `allowedDomains` to limit the agent to specific domains (and, optionally, specific HTTP methods).
-- **Environment** — only variables you pass via `env` reach the agent; the host environment is otherwise cleared.
-- **Git** — the repo's `.git` directory is exposed, including when it sits outside the project tree (worktrees).
-
-Everything else is denied. `$HOME` is an ephemeral writable tmpfs that disappears when the sandbox exits.
-
-## Usage
-
-The quickest way to get started is with a flake template. If you prefer a `shell.nix`, see [`shells/`](shells/) for ready-to-use examples. Authentication is covered [below](#authentication).
 
 ### Templates
 
