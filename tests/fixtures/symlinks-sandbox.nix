@@ -9,6 +9,7 @@ in sandbox.mkSandbox {
   allowedPackages = [ pkgs.coreutils ];
   rwDirs = [ "$HOME/.test-state-dir" ];
   rwFiles = [ "$HOME/.test-state-file" ];
+  roFiles = [ "$HOME/.test-ro-file" ];
   env = {
     # A nix store path NOT in the closure — for testing that symlink targets
     # outside the closure are bound read-only. (pkgs.hello is not in

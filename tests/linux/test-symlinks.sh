@@ -25,6 +25,7 @@ cd "$TESTDIR"
 # no longer creates declared bind paths automatically.
 mkdir -p "$HOME/.test-state-dir"
 touch "$HOME/.test-state-file"
+touch "$HOME/.test-ro-file"
 
 echo "=== rwDir/rwFile and symlink resolution tests (Linux) ==="
 echo
@@ -52,7 +53,17 @@ expect_ok  "rwFile symlink to out-of-bounds path: sandbox still starts cleanly" 
 rm -f "$HOME/.test-state-file"
 ln -sfn "$CLOSURE_STORE_FILE" "$HOME/.test-state-file"
 
-expect_ok "rwFile symlink to in-closure store file: readable" "cat \$CLOSURE_STORE_FILE"
+expect_ok "rwFile symlink to nix store file: readable at nix store path" "cat \$CLOSURE_STORE_FILE"
+expect_ok "rwFile symlink to nix store file: readable at declared path" "cat \$HOME/.test-state-file"
+
+# --- Test B2: roFile is a symlink to a nix store file (in closure) ---
+rm -f "$HOME/.test-ro-file"
+ln -sfn "$CLOSURE_STORE_FILE" "$HOME/.test-ro-file"
+
+expect_ok   "roFile symlink to nix store file: readable at declared path"   "cat \$HOME/.test-ro-file"
+expect_fail "roFile symlink to nix store file: not writable at declared path" "echo x >> \$HOME/.test-ro-file"
+
+rm -f "$HOME/.test-ro-file"; touch "$HOME/.test-ro-file"
 
 # --- Test C: rwDir symlink to out-of-bounds path is rejected ---
 # Symlinks that point outside /nix/store (and paths already in BOUND_PREFIXES)

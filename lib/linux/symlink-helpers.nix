@@ -4,7 +4,8 @@
 # The three shell functions must be emitted in order after BOUND_PREFIXES is
 # populated: isAlreadyBoundBashStr, then addSymlinkTargetBashStr (which also
 # initialises the runtime variables), then followSymlinkChainBashStr.
-{ pkgs, shared }: {
+{ pkgs, shared }:
+{
   # Checks whether a path is already covered by one of the bound prefixes.
   isAlreadyBoundBashStr =
     # bash
@@ -19,8 +20,9 @@
       }
     '';
 
-  # Initialises the output variables, then defines _add_symlink_target which
-  # appends a resolved path (and its missing parent dirs) to those variables.
+  # Initialises the output variables, then defines _ensure_parent_dirs (emits
+  # --dir entries for a path's ancestors) and _add_symlink_target (appends a
+  # resolved nix store path and its missing parent dirs to the output vars).
 
   addSymlinkTargetBashStr =
     # bash
@@ -29,6 +31,27 @@
       SEEN_PARENT_DIRS=()
       readonlyStateFileSymlinks=""
       SYMLINK_PARENT_DIRS=""
+
+      # Emit --dir entries for each ancestor of _path that bwrap has not already
+      # been told about. Needed whenever a file is bound at a path whose parent
+      # dirs don't exist in the sandbox yet (e.g. under an ephemeral $HOME tmpfs).
+      # SEEN_PARENT_DIRS dedupes without affecting bind decisions.
+      _ensure_parent_dirs() {
+        local _path="$1"
+        local _dir _seen _existing
+        _dir=$(dirname "$_path")
+        while [[ "$_dir" != "/" ]]; do
+          _is_already_bound "$_dir" && break
+          _seen=0
+          for _existing in "''${SEEN_PARENT_DIRS[@]}"; do
+            [[ "$_existing" == "$_dir" ]] && { _seen=1; break; }
+          done
+          (( _seen )) && break
+          SYMLINK_PARENT_DIRS="$SYMLINK_PARENT_DIRS --dir $_dir"
+          SEEN_PARENT_DIRS+=("$_dir")
+          _dir=$(dirname "$_dir")
+        done
+      }
 
       _add_symlink_target() {
         local _target="$1"
@@ -43,28 +66,15 @@
         # expands the sandbox on the next startup (e.g. ~/.claude/evil -> /etc/shadow).
         # Nix store paths are exempt: they are immutable and agent-unwritable.
         if [[ "$_target" != /nix/store/* ]]; then
-          echo "${shared.warnPrefix} ignoring symlink to '$_target' — target is outside permitted paths; declare it as a stateDir or stateFile to allow access" >&2
+          echo "${shared.warnPrefix} ignoring symlink to '$_target' — target is outside permitted paths; declare it as a rwDir, rwFile, roDir or roFile to allow access" >&2
           return
         fi
         readonlyStateFileSymlinks="$readonlyStateFileSymlinks --ro-bind $_target $_target"
         # Emit --dir entries for ancestor dirs so bwrap has mountpoints. These
         # ancestors are NOT added to BOUND_PREFIXES: --dir only creates an empty
         # dir, it does not expose its contents, so sibling files under the same
-        # ancestor still need their own --ro-bind. SEEN_PARENT_DIRS dedupes the
-        # --dir emission without affecting bind decisions.
-        local _dir _seen _existing
-        _dir=$(dirname "$_target")
-        while [[ "$_dir" != "/" ]]; do
-          _is_already_bound "$_dir" && break
-          _seen=0
-          for _existing in "''${SEEN_PARENT_DIRS[@]}"; do
-            [[ "$_existing" == "$_dir" ]] && { _seen=1; break; }
-          done
-          (( _seen )) && break
-          SYMLINK_PARENT_DIRS="$SYMLINK_PARENT_DIRS --dir $_dir"
-          SEEN_PARENT_DIRS+=("$_dir")
-          _dir=$(dirname "$_dir")
-        done
+        # ancestor still need their own --ro-bind.
+        _ensure_parent_dirs "$_target"
       }
     '';
 
@@ -98,26 +108,38 @@
       }
     '';
 
-  # Per-rwFile: if it is a symlink, walk its chain via _follow_symlink_chain;
-  # otherwise bind directly. Appends to STATE_FILE_BINDS at runtime.
-  mkResolveFileBashStr = file:
+  # Per-rwFile: if it is a symlink, walk its chain via _follow_symlink_chain
+  # and then bind the final nix store target at the declared path so the file
+  # is accessible where callers expect it. Otherwise bind directly.
+  # Appends to STATE_FILE_BINDS at runtime.
+  mkResolveFileBashStr =
+    file:
     # bash
     ''
       if [[ -L "${file}" ]]; then
         _follow_symlink_chain "${file}"
+        _final=$(${pkgs.coreutils}/bin/readlink -f "${file}" 2>/dev/null)
+        if [[ "$_final" == /nix/store/* ]]; then
+          STATE_FILE_BINDS="$STATE_FILE_BINDS --bind $_final ${file}"
+          _ensure_parent_dirs "${file}"
+        fi
       else
         STATE_FILE_BINDS="$STATE_FILE_BINDS --bind ${file} ${file}"
       fi
     '';
 
-  # Per-roFile: same shape as mkResolveFileBashStr but the non-symlink branch
-  # binds read-only. Symlink targets resolved via _follow_symlink_chain are
-  # already bound read-only by _add_symlink_target.
-  mkResolveRoFileBashStr = file:
+  # Per-roFile: same shape as mkResolveFileBashStr but binds read-only.
+  mkResolveRoFileBashStr =
+    file:
     # bash
     ''
       if [[ -L "${file}" ]]; then
         _follow_symlink_chain "${file}"
+        _final=$(${pkgs.coreutils}/bin/readlink -f "${file}" 2>/dev/null)
+        if [[ "$_final" == /nix/store/* ]]; then
+          RO_FILE_BINDS="$RO_FILE_BINDS --ro-bind $_final ${file}"
+          _ensure_parent_dirs "${file}"
+        fi
       else
         RO_FILE_BINDS="$RO_FILE_BINDS --ro-bind ${file} ${file}"
       fi
@@ -125,7 +147,8 @@
 
   # Per-stateDir: scan for top-level symlinks inside the bound dir and walk
   # each symlink chain via _follow_symlink_chain.
-  mkScanDirBashStr = dir:
+  mkScanDirBashStr =
+    dir:
     # bash
     ''
       while IFS= read -r _symlink; do
