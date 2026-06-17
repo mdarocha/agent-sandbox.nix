@@ -75,6 +75,7 @@
   binName,
   outName,
   allowedPackages,
+  allowNix ? false,
   rwDirs ? [ ],
   rwFiles ? [ ],
   roDirs ? [ ],
@@ -99,12 +100,15 @@ let
   # Runs inside the sandbox ahead of the agent binary: probes for a declared
   # git identity and warns the user at launch if none is found, then exec's
   # the real command. See lib/pre-entry-script.sh.
-  preEntryScript = pkgs.writeShellScript "pre-entry-script" (builtins.readFile ../pre-entry-script.sh);
+  preEntryScript = pkgs.writeShellScript "pre-entry-script" (
+    builtins.readFile ../pre-entry-script.sh
+  );
   emptyFile = pkgs.writeText "sandbox-empty" "";
   implicitPackages = [
     pkgs.cacert
     bashWrapper
-  ];
+  ]
+  ++ (if allowNix then [ pkgs.nix ] else [ ]);
   hostsFile = pkgs.writeText "sandbox-hosts" ''
     127.0.0.1 localhost
     ::1       localhost
@@ -235,6 +239,34 @@ let
       fi
     '';
 
+  nixStoreBashStr =
+    if allowNix then
+      # bash
+      ''
+        BOUND_PREFIXES=("/nix/store")
+        NIX_DAEMON_SOCKET_PATH="''${NIX_DAEMON_SOCKET_PATH:-/nix/var/nix/daemon-socket/socket}"
+      ''
+    else
+      # bash
+      ''
+        # Build per-path ro-bind flags for the nix store closure
+        CLOSURE_BINDS=""
+        BOUND_PREFIXES=()
+        while IFS= read -r storePath; do
+          CLOSURE_BINDS="$CLOSURE_BINDS --ro-bind $storePath $storePath"
+          BOUND_PREFIXES+=("$storePath")
+        done < ${closurePathsFile}
+      '';
+
+  nixStoreBwrapStr =
+    if allowNix then
+      "--ro-bind /nix/store /nix/store --ro-bind-try /nix/var /nix/var"
+    else
+      "--tmpfs /nix/store $CLOSURE_BINDS";
+
+  nixDaemonSocketBwrapStr =
+    if allowNix then ''--setenv NIX_DAEMON_SOCKET_PATH "$NIX_DAEMON_SOCKET_PATH"'' else "";
+
 in
 
 builtins.seq
@@ -253,18 +285,17 @@ builtins.seq
         # bash
         ''
           #!${pkgs.bashInteractive}/bin/bash
-            CWD=$(pwd)
-            ${shared.assertBindsExistBashStr { inherit rwDirs rwFiles roDirs roFiles; }}
-            ${gitDetectionBashStr}
-
-            # Build per-path ro-bind flags for the nix store closure
-            CLOSURE_BINDS=""
-            BOUND_PREFIXES=()
-            while IFS= read -r storePath; do
-              CLOSURE_BINDS="$CLOSURE_BINDS --ro-bind $storePath $storePath"
-              BOUND_PREFIXES+=("$storePath")
-            done < ${closurePathsFile}
-
+          CWD=$(pwd)
+          ${shared.assertBindsExistBashStr {
+            inherit
+              rwDirs
+              rwFiles
+              roDirs
+              roFiles
+              ;
+          }}
+          ${gitDetectionBashStr}
+          ${nixStoreBashStr}
           ${symlinkResolutionBashStr}
           ${sandboxPasswdBashStr}
           ${conditionalNetworkingParams.proxyStartupBashStr}
@@ -272,8 +303,7 @@ builtins.seq
           ${trapBashStr}
           ${conditionalNetworkingParams.sandboxExecBashStr}${pkgs.coreutils}/bin/env -i ${pkgs.bubblewrap}/bin/bwrap \
             ${conditionalNetworkingParams.etcResolvBind} \
-            --tmpfs /nix/store \
-            $CLOSURE_BINDS \
+            ${nixStoreBwrapStr} \
             --ro-bind "$_SANDBOX_PASSWD" /etc/passwd \
             --ro-bind ${hostsFile} /etc/hosts \
             --ro-bind-try /etc/ssl/certs /etc/ssl/certs \
@@ -317,6 +347,7 @@ builtins.seq
             ${conditionalNetworkingParams.caCertBubblewrapStr} \
             ${conditionalNetworkingParams.proxyEnvBubblewrapStr} \
             ${extraEnvStr} \
+            ${nixDaemonSocketBwrapStr} \
             ${preEntryScript} ${pkg}/bin/${binName} "$@"
         '';
     }
