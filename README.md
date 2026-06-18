@@ -16,6 +16,7 @@ Tested with Claude's frontier models — see [Security](#security) for the threa
 - **Network** — unrestricted by default. Set `allowedDomains` to limit the agent to specific domains (and, optionally, specific HTTP methods).
 - **Environment** — only variables you pass via `env` reach the agent; the host environment is otherwise cleared.
 - **Git** — the repo's `.git` directory is exposed, including when it sits outside the project tree (worktrees).
+- **Nix** — disabled by default. Optionally allow the agent to run nix commands.
 
 Everything else is denied. `$HOME` is an ephemeral writable tmpfs that disappears when the sandbox exits.
 
@@ -88,6 +89,7 @@ If you want to keep the original command name as the alias, change the `outName`
 | `rwFiles` | no | Individual files the agent can read/write |
 | `roDirs` | no | Directories the agent can read but not write (e.g. signed binaries, reference source trees, secret stores) |
 | `roFiles` | no | Individual files the agent can read but not write (e.g. `~/.config/git/config` for git identity — see [Git identity](#git-identity)) |
+| `allowNix` | no | If `true`, expose the host's `nix-daemon` socket and the full Nix store so the agent can run `nix build`, `nix run`, `nix develop`, etc. `pkgs.nix` is added to PATH automatically. Defaults to `false`. See [Using Nix inside the sandbox](#using-nix-inside-the-sandbox). |
 | `env` | no | Additional environment variables as an attrset |
 | `allowedDomains` | no | Limits which domains the sandbox can reach. Leave unset for open internet. Accepts a list of domains (all methods allowed), or an attrset mapping each domain to `"*"` or a list of HTTP methods. `[ ]` blocks all internet access. |
 
@@ -265,6 +267,22 @@ To get correctly-attributed commits, declare a real identity in one of two ways:
   ```
 
 > **Note:** do not run `git config --global ...` inside the sandbox — `$HOME` is an ephemeral tmpfs there, so it won't persist. Set your identity on the host and bind it, or use `env`.
+
+## Using Nix inside the sandbox
+
+Set `allowNix = true` to let the agent invoke nix commands from inside the sandbox. The agent is given access to the host's nix daemon and the full nix store. `pkgs.nix` is added to the agent's PATH automatically — you don't need to put it in `allowedPackages`.
+
+What you need to configure:
+
+- **Flake CLI features:** Your nix config is not visibile inside the sandbox. Either bind it via `roFiles = [ "/etc/nix/nix.conf" ]` to inherit your whole config or set `env.NIX_CONFIG = "experimental-features = nix-command flakes"` to enable just the flake CLI.
+
+- **Nix state directories:** The client caches the flake registry and downloaded tarballs under `$HOME/.cache/nix`, writes registry overrides to `$HOME/.config/nix`, and stores per-user profiles under `$HOME/.local/share/nix`. Add these to `rwDirs` if you want any of that to persist across invocations.
+
+- **Allowed domains:** When `allowedDomains` is set, the nix client itself needs `channels.nixos.org` , `github.com` + `raw.githubusercontent.com` , and `cache.nixos.org` to reliably fetch packages and flakes.
+
+A complete example is at [`shells/claude-nix.shell.nix`](shells/claude-nix.shell.nix).
+
+> **Security note:** `allowNix = true` weakens the security posture of the sandbox. The full Nix store is exposed and any executable in the nix store can be run by the agent — `allowedPackages` no longer restricts what the agent can *execute*, only what's on `PATH`. The `nix-daemon` runs outside the sandbox, so its own network activity — downloads of prebuilt packages from the caches it's configured to use — bypasses `allowedDomains`.
 
 ## Common Patterns / Recipes
 

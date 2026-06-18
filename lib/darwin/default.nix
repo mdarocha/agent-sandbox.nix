@@ -167,6 +167,7 @@
   binName,
   outName,
   allowedPackages,
+  allowNix ? false,
   rwDirs ? [ ],
   rwFiles ? [ ],
   roDirs ? [ ],
@@ -195,7 +196,8 @@ let
   implicitPackages = [
     pkgs.cacert
     bashWrapper
-  ];
+  ]
+  ++ (if allowNix then [ pkgs.nix ] else [ ]);
   pathStr = pkgs.lib.makeBinPath (allowedPackages ++ implicitPackages);
 
   # Generate indexed param names
@@ -421,8 +423,44 @@ let
         printf '    (allow file-read-metadata (literal "%s"))\n' "$_dir" >> "$SANDBOX_PROFILE"
       done
     '';
+  # Nix daemon socket + full-store exec rules, only when allowNix is set.
+  # Empty otherwise so the profile carries no (param "NIX_DAEMON_SOCKET_PATH")
+  # reference and no matching -D flag is required.
+  nixSupportRulesStr =
+    if allowNix then
+      # scheme
+      ''
+        (allow file-read-metadata (subpath "/nix/var"))
+        (allow file-read-metadata (subpath "/etc/nix") (subpath "/private/etc/nix"))
+        (allow network-outbound
+          (remote unix-socket (path-literal (param "NIX_DAEMON_SOCKET_PATH"))))
+        (allow process-exec (subpath "/nix/store"))''
+    else
+      "";
+
+  # Detect the daemon socket path at runtime (honouring an override) and
+  # canonicalize it: the kernel resolves symlinks before invoking the
+  # seatbelt hook, so (path-literal …) must hold the resolved path or the
+  # rule never matches. Determinate Nix on macOS exposes the upstream path
+  # as a symlink onto /var/run/nix-daemon.socket; without readlink -f the
+  # connect is denied and the client reports EPERM against the unresolved
+  # path. On installs where the path isn't a symlink, readlink -f is a no-op.
+  nixDaemonSocketBashStr =
+    if allowNix then
+      # bash
+      ''
+        NIX_DAEMON_SOCKET_PATH="''${NIX_DAEMON_SOCKET_PATH:-/nix/var/nix/daemon-socket/socket}"
+        NIX_DAEMON_SOCKET_PATH=$(${pkgs.coreutils}/bin/readlink -f "$NIX_DAEMON_SOCKET_PATH" 2>/dev/null || echo "$NIX_DAEMON_SOCKET_PATH")
+      ''
+    else
+      "";
+
+  nixDaemonSocketFlag =
+    if allowNix then ''-D NIX_DAEMON_SOCKET_PATH="$NIX_DAEMON_SOCKET_PATH"'' else "";
+
   seatbeltStaticRules = import ./seatbelt-profile.nix {
     networkRulesStr = conditionalNetworkingParams.networkSeatbeltRulesStr;
+    nixSupportRulesStr = nixSupportRulesStr;
     allowReadWriteExecStr = seatbeltAllowReadWriteExec;
     allowFilesStr = seatbeltAllowFiles;
     allowReadOnlyStr = seatbeltAllowReadOnly;
@@ -473,6 +511,7 @@ builtins.seq
 
           ${gitDetectionBashStr}
           ${ttyDetectionBashStr}
+          ${nixDaemonSocketBashStr}
 
           # Resolve rwDirs/rwFiles/roDirs/roFiles paths while $HOME still points
           # at real home.
@@ -531,6 +570,7 @@ builtins.seq
             -D HOME="$SANDBOX_HOME"  \
             -D REAL_HOME="$REAL_HOME" \
             -D SANDBOX_PASSWD="$_SANDBOX_PASSWD" \
+            ${nixDaemonSocketFlag} \
             -D HOME_CACHE="$SANDBOX_HOME/.cache" \
             -D HOME_LOCAL="$SANDBOX_HOME/.local" \
             -D HOME_LOCAL_STATE="$SANDBOX_HOME/.local/state" \
