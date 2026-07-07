@@ -123,6 +123,7 @@ If you want to keep the original command name as the alias, change the `outName`
 | `allowNix` | no | If `true`, expose the host's `nix-daemon` socket and the full Nix store so the agent can run `nix build`, `nix run`, `nix develop`, etc. `pkgs.nix` is added to PATH automatically. Defaults to `false`. See [Using Nix inside the sandbox](#using-nix-inside-the-sandbox). |
 | `env` | no | Additional environment variables as an attrset |
 | `allowedDomains` | no | Limits which domains the sandbox can reach. Leave unset for open internet. Accepts a list of domains (all methods allowed), or an attrset mapping each domain to `"*"` or a list of HTTP methods. `[ ]` blocks all internet access. |
+| `shellHook` | no | A bash script fragment that runs *outside* the sandbox before it starts. Its exports are injected into the sandbox. Primary use case: `eval "$(direnv export bash)"` to activate the project's devShell. When set, the full `/nix/store` is bind-mounted so hook-provided store paths are accessible. |
 
 Paths declared in `rwDirs` / `rwFiles` / `roDirs` / `roFiles` must exist on the host before launch — the sandbox exits with a clear error if any are missing.
 
@@ -177,6 +178,26 @@ Domains are suffix-matched, so `"anthropic.com"` will capture all `*.anthropic.c
 When `allowedDomains` is set, all HTTP/HTTPS traffic is routed through a filtering proxy that inspects requests by domain and HTTP method. The sandbox cannot bypass the proxy and DNS resolution is blocked. WebSocket connections are not permitted.
 
 Blocked requests are logged to `/tmp/sandbox-proxy.log`. See [Git](#git) for limitations on SSH-based remotes.
+
+
+## direnv
+
+[direnv](https://direnv.net/) + a project `devShell` already solve the per-project toolchain problem for human developers: `cd` into the repo and the right binaries appear on `$PATH`. `shellHook` bridges this into the sandbox.
+
+```nix
+mkSandbox {
+  # ...
+  shellHook = ''
+    eval "$(direnv export bash)"
+  '';
+}
+```
+
+When the sandbox starts, `shellHook` is sourced in the host environment (outside the sandbox). Any environment variables it exports are injected into the sandbox as `--setenv` flags. PATH changes are handled separately: hook-provided PATH entries are prepended to the sandbox PATH so both devShell tools and `allowedPackages` binaries are reachable.
+
+**Prerequisites:** `direnv allow` must have been run for the project's `.envrc`. The hook runs with the host PATH (not the sandbox PATH), so `direnv` itself must be on your host `$PATH`.
+
+**Security note:** `shellHook` runs before the sandbox is set up, with full host permissions. Only use it with scripts you trust.
 
 ## Authentication
 

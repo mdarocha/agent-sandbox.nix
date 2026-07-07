@@ -94,6 +94,7 @@
   extraEnv ? null,
   stateDirs ? null,
   stateFiles ? null,
+  shellHook ? "",
 }:
 let
   bashWrapper = shared.bashWrapper;
@@ -246,6 +247,14 @@ let
         BOUND_PREFIXES=("/nix/store")
         NIX_DAEMON_SOCKET_PATH="''${NIX_DAEMON_SOCKET_PATH:-/nix/var/nix/daemon-socket/socket}"
       ''
+    else if shellHook != "" then
+      # bash
+      ''
+        # shellHook active: bind entire /nix/store so hook-provided store paths
+        # (e.g. from a direnv devShell) are accessible inside the sandbox.
+        CLOSURE_BINDS=""
+        BOUND_PREFIXES=("/nix/store")
+      ''
     else
       # bash
       ''
@@ -261,11 +270,62 @@ let
   nixStoreBwrapStr =
     if allowNix then
       "--ro-bind /nix/store /nix/store --ro-bind-try /nix/var /nix/var"
+    else if shellHook != "" then
+      "--ro-bind /nix/store /nix/store"
     else
       "--tmpfs /nix/store $CLOSURE_BINDS";
 
   nixDaemonSocketBwrapStr =
     if allowNix then ''--setenv NIX_DAEMON_SOCKET_PATH "$NIX_DAEMON_SOCKET_PATH"'' else "";
+
+  # When shellHook is provided: source it outside the sandbox, snapshot env
+  # before and after, collect new/changed exports, inject via --setenv.
+  # PATH changes are prepended to the sandbox PATH so both devShell tools
+  # and allowedPackages binaries are always reachable.
+  shellHookBashStr =
+    if shellHook != "" then
+      let
+        hookFile = pkgs.writeText "sandbox-shell-hook" shellHook;
+      in
+      # bash
+      ''
+        _PRE_HOOK_PATH="$PATH"
+        declare -A _PRE_HOOK_ENV
+        while IFS= read -r -d "" _hook_entry; do
+          _hook_k="''${_hook_entry%%=*}"
+          _PRE_HOOK_ENV["$_hook_k"]="''${_hook_entry#*=}"
+        done < <(env -0)
+
+        # shellcheck source=/dev/null
+        source "${hookFile}"
+
+        _HOOK_EXTRA_ENVS=()
+        _SANDBOX_PATH="${pathStr}"
+        while IFS= read -r -d "" _hook_entry; do
+          _hook_k="''${_hook_entry%%=*}"
+          _hook_v="''${_hook_entry#*=}"
+          case "$_hook_k" in
+            HOME|TERM|SHELL|PATH|SSL_CERT_DIR|NIX_SSL_CERT_FILE|TMPDIR) continue ;;
+            SHLVL|_|OLDPWD|PWD|BASH_VERSINFO|BASH_VERSION|PPID|EUID|UID) continue ;;
+            GROUPS|BASHOPTS|SHELLOPTS|IFS) continue ;;
+          esac
+          if [[ "''${_PRE_HOOK_ENV[''${_hook_k}]+set}" = "set" ]] && \
+             [[ "''${_PRE_HOOK_ENV[''${_hook_k}]}" = "$_hook_v" ]]; then
+            continue
+          fi
+          _HOOK_EXTRA_ENVS+=(--setenv "$_hook_k" "$_hook_v")
+        done < <(env -0)
+
+        if [[ "$PATH" != "$_PRE_HOOK_PATH" ]]; then
+          _SANDBOX_PATH="$PATH:${pathStr}"
+        fi
+      ''
+    else
+      # bash
+      ''
+        _HOOK_EXTRA_ENVS=()
+        _SANDBOX_PATH="${pathStr}"
+      '';
 
 in
 
@@ -295,6 +355,7 @@ builtins.seq
               ;
           }}
           ${gitDetectionBashStr}
+          ${shellHookBashStr}
           ${nixStoreBashStr}
           ${symlinkResolutionBashStr}
           ${sandboxPasswdBashStr}
@@ -337,7 +398,7 @@ builtins.seq
             --setenv HOME "$HOME" \
             --setenv TERM "$TERM" \
             --setenv SHELL "${bashWrapper}/bin/bash" \
-            --setenv PATH "${pathStr}" \
+            --setenv PATH "$_SANDBOX_PATH" \
             --setenv SSL_CERT_DIR "${pkgs.cacert}/etc/ssl/certs" \
             --setenv TMPDIR /tmp \
             --setenv GIT_CONFIG_COUNT 1 \
@@ -347,6 +408,7 @@ builtins.seq
             ${conditionalNetworkingParams.caCertBubblewrapStr} \
             ${conditionalNetworkingParams.proxyEnvBubblewrapStr} \
             ${extraEnvStr} \
+            "''${_HOOK_EXTRA_ENVS[@]}" \
             ${nixDaemonSocketBwrapStr} \
             ${preEntryScript} ${pkg}/bin/${binName} "$@"
         '';
