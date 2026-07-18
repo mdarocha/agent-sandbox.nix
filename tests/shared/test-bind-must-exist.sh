@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# Test: missing rwDirs / roDirs are warned and skipped; missing rwFiles / roFiles
-# are still hard errors.
-#
-# Directories are optional on any given machine (cache dirs, tool-specific
-# config dirs, etc.). A missing directory emits a WARN line but does not abort
-# the sandbox launch. Files are precise targets; a missing file almost certainly
-# means a typo, so it remains a hard error.
+# Test: missing rwDirs, rwFiles, roDirs, roFiles are silently skipped —
+# the sandbox launches regardless of whether declared paths exist.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -20,44 +15,35 @@ TESTDIR=$(mktemp -d "$TESTDIR_ROOT/bind-must-exist.XXXXXX")
 trap 'rm -rf "$TESTDIR"' EXIT
 cd "$TESTDIR"
 
-# HOME is overridden per-invocation so the existence of the declared
-# rwDir/rwFile is entirely controlled by this test, independent of the
-# host's real $HOME contents.
 FAKE_HOME="$TESTDIR/home"
 mkdir -p "$FAKE_HOME"
 
 DIR_PATH="$FAKE_HOME/.agent-sandbox-bind-must-exist/dir"
 FILE_PATH="$FAKE_HOME/.agent-sandbox-bind-must-exist/file"
 
-echo "=== Bind paths must exist (shared) ==="
+echo "=== Missing bind paths are silently skipped (shared) ==="
 echo
 
-# --- 1. Both missing: only rwFile error is fatal; rwDir gets a warning ---
-capture env HOME="$FAKE_HOME" "$SHELL_BIN" -c 'echo unreachable'
-assert_exit_code "both missing: launch fails (rwFile is missing)" 1
-assert_stderr_contains "both missing: rwDir warning reported" \
-	"$DIR_PATH: declared as rwDir but does not exist"
-assert_stderr_contains "both missing: rwFile error reported" \
-	"$FILE_PATH: declared as rwFile but does not exist"
+# --- 1. Both missing: launch still succeeds, no output ---
+capture env HOME="$FAKE_HOME" "$SHELL_BIN" -c 'echo ok'
+assert_exit_code "both missing: launch succeeds" 0
+assert_output_equals "both missing: command runs in sandbox" "ok"
+assert_stderr_not_contains "both missing: no output about rwDir" "rwDir"
+assert_stderr_not_contains "both missing: no output about rwFile" "rwFile"
 
-# --- 2. Only rwDir missing: sandbox still launches (dir is optional) ---
+# --- 2. Only rwDir missing ---
 mkdir -p "$(dirname "$FILE_PATH")"
 touch "$FILE_PATH"
 capture env HOME="$FAKE_HOME" "$SHELL_BIN" -c 'echo ok'
 assert_exit_code "rwDir missing only: launch succeeds" 0
-assert_stderr_contains "rwDir missing only: rwDir warning reported" \
-	"$DIR_PATH: declared as rwDir but does not exist"
 assert_output_equals "rwDir missing only: command runs in sandbox" "ok"
 
 # --- 3. Only rwFile missing ---
 rm -f "$FILE_PATH"
 mkdir -p "$DIR_PATH"
-capture env HOME="$FAKE_HOME" "$SHELL_BIN" -c 'echo unreachable'
-assert_exit_code "rwFile missing only: launch fails" 1
-assert_stderr_contains "rwFile missing only: rwFile error reported" \
-	"$FILE_PATH: declared as rwFile but does not exist"
-assert_stderr_not_contains "rwFile missing only: no rwDir error" \
-	"declared as rwDir"
+capture env HOME="$FAKE_HOME" "$SHELL_BIN" -c 'echo ok'
+assert_exit_code "rwFile missing only: launch succeeds" 0
+assert_output_equals "rwFile missing only: command runs in sandbox" "ok"
 
 # --- 4. All present: launch succeeds ---
 touch "$FILE_PATH"
