@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Test: declared rwDirs / rwFiles must exist on the host before the sandbox
-# launches.
+# Test: missing rwDirs / roDirs are warned and skipped; missing rwFiles / roFiles
+# are still hard errors.
 #
-# The wrapper used to silently `mkdir -p` declared rwDirs and `touch` declared
-# rwFiles at launch. That hid typos like `rwDirs = [ "$HOME/.cluade" ]` — the
-# agent would populate the misspelled directory and the real ~/.claude config
-# would diverge silently. After this change the wrapper checks each declared
-# path with `[ -e ]` (so broken symlinks also fail), accumulates every missing
-# path, prints one error line per miss, and exits 1 before any sandboxing runs.
+# Directories are optional on any given machine (cache dirs, tool-specific
+# config dirs, etc.). A missing directory emits a WARN line but does not abort
+# the sandbox launch. Files are precise targets; a missing file almost certainly
+# means a typo, so it remains a hard error.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -34,23 +32,22 @@ FILE_PATH="$FAKE_HOME/.agent-sandbox-bind-must-exist/file"
 echo "=== Bind paths must exist (shared) ==="
 echo
 
-# --- 1. Both missing: both errors reported in one launch ---
+# --- 1. Both missing: only rwFile error is fatal; rwDir gets a warning ---
 capture env HOME="$FAKE_HOME" "$SHELL_BIN" -c 'echo unreachable'
-assert_exit_code "both missing: launch fails" 1
-assert_stderr_contains "both missing: rwDir error reported" \
+assert_exit_code "both missing: launch fails (rwFile is missing)" 1
+assert_stderr_contains "both missing: rwDir warning reported" \
 	"$DIR_PATH: declared as rwDir but does not exist"
 assert_stderr_contains "both missing: rwFile error reported" \
 	"$FILE_PATH: declared as rwFile but does not exist"
 
-# --- 2. Only rwDir missing ---
+# --- 2. Only rwDir missing: sandbox still launches (dir is optional) ---
 mkdir -p "$(dirname "$FILE_PATH")"
 touch "$FILE_PATH"
-capture env HOME="$FAKE_HOME" "$SHELL_BIN" -c 'echo unreachable'
-assert_exit_code "rwDir missing only: launch fails" 1
-assert_stderr_contains "rwDir missing only: rwDir error reported" \
+capture env HOME="$FAKE_HOME" "$SHELL_BIN" -c 'echo ok'
+assert_exit_code "rwDir missing only: launch succeeds" 0
+assert_stderr_contains "rwDir missing only: rwDir warning reported" \
 	"$DIR_PATH: declared as rwDir but does not exist"
-assert_stderr_not_contains "rwDir missing only: no rwFile error" \
-	"declared as rwFile"
+assert_output_equals "rwDir missing only: command runs in sandbox" "ok"
 
 # --- 3. Only rwFile missing ---
 rm -f "$FILE_PATH"

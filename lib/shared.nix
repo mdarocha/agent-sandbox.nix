@@ -107,7 +107,19 @@ let
       roFiles ? [ ],
     }:
     let
-      mkCheck =
+      # Directories are optional — they may not exist on every machine (cache
+      # dirs, tool-specific config dirs, etc.). Emit a warning so the user
+      # knows the bind was skipped, but do not abort the sandbox launch.
+      mkDirCheck =
+        label: p:
+        # bash
+        ''
+          if [ ! -e "${p}" ]; then
+            echo "${warnPrefix} ${p}: declared as ${label} but does not exist — skipping" >&2
+          fi'';
+      # Files are precise targets; a missing file almost certainly means a
+      # typo or misconfiguration. Keep these as hard errors.
+      mkFileCheck =
         label: p:
         # bash
         ''
@@ -116,10 +128,10 @@ let
             _BIND_MISSING=1
           fi'';
       allChecks = builtins.concatStringsSep "\n" (
-        map (mkCheck "rwDir") rwDirs
-        ++ map (mkCheck "rwFile") rwFiles
-        ++ map (mkCheck "roDir") roDirs
-        ++ map (mkCheck "roFile") roFiles
+        map (mkDirCheck "rwDir") rwDirs
+        ++ map (mkFileCheck "rwFile") rwFiles
+        ++ map (mkDirCheck "roDir") roDirs
+        ++ map (mkFileCheck "roFile") roFiles
       );
     in
     # bash
