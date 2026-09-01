@@ -198,6 +198,16 @@ let
     _proxyRedirects = _proxyRedirects;
   };
 
+  # Only forwarded when the host actually sets them, so a sandboxed launch
+  # never fabricates a color capability the host terminal doesn't have.
+  terminalColorEnvBashStr =
+    # bash
+    ''
+      TERM_COLOR_BWRAP_ARGS=()
+      [[ -n "''${COLORTERM:-}" ]] && TERM_COLOR_BWRAP_ARGS+=(--setenv COLORTERM "$COLORTERM")
+      [[ -n "''${WT_SESSION:-}" ]] && TERM_COLOR_BWRAP_ARGS+=(--setenv WT_SESSION "$WT_SESSION")
+    '';
+
   sandboxPasswdBashStr =
     # bash
     ''
@@ -360,6 +370,7 @@ builtins.seq
           ${nixStoreBashStr}
           ${symlinkResolutionBashStr}
           ${sandboxPasswdBashStr}
+          ${terminalColorEnvBashStr}
           ${conditionalNetworkingParams.proxyStartupBashStr}
           ${conditionalNetworkingParams.resolvConfSetupBashStr}
           ${trapBashStr}
@@ -399,6 +410,7 @@ builtins.seq
             --clearenv \
             --setenv HOME "$HOME" \
             --setenv TERM "$TERM" \
+            "''${TERM_COLOR_BWRAP_ARGS[@]}" \
             --setenv SHELL "${bashWrapper}/bin/bash" \
             --setenv PATH "${pathStr}" \
             --setenv SSL_CERT_DIR "${pkgs.cacert}/etc/ssl/certs" \
