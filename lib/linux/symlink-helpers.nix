@@ -29,8 +29,8 @@
     ''
       RESOLVED_TARGETS=()
       SEEN_PARENT_DIRS=()
-      readonlyStateFileSymlinks=""
-      SYMLINK_PARENT_DIRS=""
+      readonlyStateFileSymlinks=()
+      SYMLINK_PARENT_DIRS=()
 
       # Emit --dir entries for each ancestor of _path that bwrap has not already
       # been told about. Needed whenever a file is bound at a path whose parent
@@ -47,7 +47,7 @@
             [[ "$_existing" == "$_dir" ]] && { _seen=1; break; }
           done
           (( _seen )) && break
-          SYMLINK_PARENT_DIRS="$SYMLINK_PARENT_DIRS --dir $_dir"
+          SYMLINK_PARENT_DIRS+=(--dir "$_dir")
           SEEN_PARENT_DIRS+=("$_dir")
           _dir=$(dirname "$_dir")
         done
@@ -69,7 +69,7 @@
           echo "${shared.warnPrefix} ignoring symlink to '$_target' — target is outside permitted paths; declare it as a rwDir, rwFile, roDir or roFile to allow access" >&2
           return
         fi
-        readonlyStateFileSymlinks="$readonlyStateFileSymlinks --ro-bind $_target $_target"
+        readonlyStateFileSymlinks+=(--ro-bind "$_target" "$_target")
         # Emit --dir entries for ancestor dirs so bwrap has mountpoints. These
         # ancestors are NOT added to BOUND_PREFIXES: --dir only creates an empty
         # dir, it does not expose its contents, so sibling files under the same
@@ -133,12 +133,12 @@
         if ! _is_already_bound "$(dirname "${file}")"; then
           _final=$(${pkgs.coreutils}/bin/readlink -f "${file}" 2>/dev/null)
           if [[ "$_final" == /nix/store/* ]]; then
-            STATE_FILE_BINDS="$STATE_FILE_BINDS --bind $_final ${file}"
+            STATE_FILE_BINDS+=(--bind "$_final" "${file}")
             _ensure_parent_dirs "${file}"
           fi
         fi
       else
-        STATE_FILE_BINDS="$STATE_FILE_BINDS --bind ${file} ${file}"
+        STATE_FILE_BINDS+=(--bind "${file}" "${file}")
       fi
     '';
 
@@ -152,12 +152,12 @@
         if ! _is_already_bound "$(dirname "${file}")"; then
           _final=$(${pkgs.coreutils}/bin/readlink -f "${file}" 2>/dev/null)
           if [[ "$_final" == /nix/store/* ]]; then
-            RO_FILE_BINDS="$RO_FILE_BINDS --ro-bind $_final ${file}"
+            RO_FILE_BINDS+=(--ro-bind "$_final" "${file}")
             _ensure_parent_dirs "${file}"
           fi
         fi
       else
-        RO_FILE_BINDS="$RO_FILE_BINDS --ro-bind ${file} ${file}"
+        RO_FILE_BINDS+=(--ro-bind "${file}" "${file}")
       fi
     '';
 
@@ -173,10 +173,10 @@
       if [[ -L "${dir}" ]]; then
         _follow_symlink_chain "${dir}"
         if ! _is_already_bound "$(dirname "${dir}")"; then
-          STATE_DIR_BINDS="$STATE_DIR_BINDS --bind ${dir} ${dir}"
+          STATE_DIR_BINDS+=(--bind "${dir}" "${dir}")
         fi
       else
-        STATE_DIR_BINDS="$STATE_DIR_BINDS --bind ${dir} ${dir}"
+        STATE_DIR_BINDS+=(--bind "${dir}" "${dir}")
       fi
     '';
 
@@ -188,10 +188,10 @@
       if [[ -L "${dir}" ]]; then
         _follow_symlink_chain "${dir}"
         if ! _is_already_bound "$(dirname "${dir}")"; then
-          RO_DIR_BINDS="$RO_DIR_BINDS --ro-bind ${dir} ${dir}"
+          RO_DIR_BINDS+=(--ro-bind "${dir}" "${dir}")
         fi
       else
-        RO_DIR_BINDS="$RO_DIR_BINDS --ro-bind ${dir} ${dir}"
+        RO_DIR_BINDS+=(--ro-bind "${dir}" "${dir}")
       fi
     '';
 

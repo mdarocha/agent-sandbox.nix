@@ -164,16 +164,16 @@ let
       # Resolve rwFile / roFile symlinks — bind resolved targets, not the
       # symlink paths. Non-symlink files go into STATE_FILE_BINDS (--bind)
       # or RO_FILE_BINDS (--ro-bind) according to the declared mode.
-      STATE_FILE_BINDS=""
-      RO_FILE_BINDS=""
+      STATE_FILE_BINDS=()
+      RO_FILE_BINDS=()
       ${builtins.concatStringsSep "\n" (map symlinkHelpers.mkResolveFileBashStr rwFiles)}
       ${builtins.concatStringsSep "\n" (map symlinkHelpers.mkResolveRoFileBashStr roFiles)}
 
       # rwDir / roDir binds, built at runtime for the same reason as the files
       # above: a declared dir that is itself a symlink cannot be a mount
       # destination once an enclosing bind has exposed it.
-      STATE_DIR_BINDS=""
-      RO_DIR_BINDS=""
+      STATE_DIR_BINDS=()
+      RO_DIR_BINDS=()
       ${builtins.concatStringsSep "\n" (map symlinkHelpers.mkResolveDirBashStr rwDirs)}
       ${builtins.concatStringsSep "\n" (map symlinkHelpers.mkResolveRoDirBashStr roDirs)}
 
@@ -258,7 +258,7 @@ let
     ''
       GIT_PROTECT_BINDS=()
       GIT_MASKED_FILES=()
-      REPO_BIND=""
+      REPO_BIND=()
       if GIT_DIR=$(${pkgs.git}/bin/git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
         REPO_ROOT=$(dirname "$GIT_DIR")
         # Fail closed if the git root is $HOME (or an ancestor of it). Exposing it
@@ -279,7 +279,7 @@ let
           GIT_DIR=""
           REPO_ROOT=""
         else
-          REPO_BIND="--ro-bind $REPO_ROOT $REPO_ROOT"
+          REPO_BIND=(--ro-bind "$REPO_ROOT" "$REPO_ROOT")
         fi
       fi
 
@@ -319,11 +319,10 @@ let
     else
       # bash
       ''
-        # Build per-path ro-bind flags for the nix store closure
-        CLOSURE_BINDS=""
+        CLOSURE_BINDS=()
         BOUND_PREFIXES=()
         while IFS= read -r storePath; do
-          CLOSURE_BINDS="$CLOSURE_BINDS --ro-bind $storePath $storePath"
+          CLOSURE_BINDS+=(--ro-bind "$storePath" "$storePath")
           BOUND_PREFIXES+=("$storePath")
         done < ${closurePathsFile}
       '';
@@ -332,7 +331,7 @@ let
     if allowNix then
       "--ro-bind /nix/store /nix/store --ro-bind-try /nix/var /nix/var"
     else
-      "--tmpfs /nix/store $CLOSURE_BINDS";
+      ''--tmpfs /nix/store "''${CLOSURE_BINDS[@]}"'';
 
   nixDaemonSocketBwrapStr =
     if allowNix then ''--setenv NIX_DAEMON_SOCKET_PATH "$NIX_DAEMON_SOCKET_PATH"'' else "";
@@ -389,14 +388,14 @@ builtins.seq
             ${gpuBwrapStr} \
             --tmpfs /tmp \
             --tmpfs "$HOME" \
-            $REPO_BIND \
+            "''${REPO_BIND[@]}" \
             --bind "$CWD" "$CWD" \
-            $STATE_DIR_BINDS \
-            $RO_DIR_BINDS \
-            $STATE_FILE_BINDS \
-            $RO_FILE_BINDS \
-            $SYMLINK_PARENT_DIRS \
-            $readonlyStateFileSymlinks \
+            "''${STATE_DIR_BINDS[@]}" \
+            "''${RO_DIR_BINDS[@]}" \
+            "''${STATE_FILE_BINDS[@]}" \
+            "''${RO_FILE_BINDS[@]}" \
+            "''${SYMLINK_PARENT_DIRS[@]}" \
+            "''${readonlyStateFileSymlinks[@]}" \
             "''${GIT_PROTECT_BINDS[@]}" \
             --symlink ${bashWrapper}/bin/bash /bin/sh \
             --symlink ${pkgs.coreutils}/bin/env /usr/bin/env \
